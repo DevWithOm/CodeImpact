@@ -80,6 +80,10 @@ class AnalysisRequest(BaseModel):
         if trimmed.startswith(("file://", "/", "\\")) or re.match(r"^[a-zA-Z]:[\\/]", trimmed):
             raise ValueError("Local filesystem paths are not accepted. Provide an HTTP or HTTPS Git repository URL.")
 
+        # If user passed "owner/repo" shorthand (e.g. facebook/react), normalize to "https://github.com/owner/repo"
+        if re.match(r"^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$", trimmed):
+            trimmed = f"https://github.com/{trimmed}"
+
         try:
             parsed = urlparse(trimmed)
         except Exception as exc:
@@ -144,6 +148,7 @@ class AnalysisStatusResponse(BaseModel):
 
     analysis_id: str
     repository: str
+    repository_url: str | None = None
     branch: str
     commit_sha: str | None = None
     status: AnalysisStatus

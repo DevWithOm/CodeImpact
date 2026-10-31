@@ -143,3 +143,4 @@ dist/assets/index-3_PNw3Nb.js   530.11 kB │ gzip: 155.57 kB
 1. **Non-destructive principle:** Static analysis absence of usage does not imply deletion safety; explanations emphasize validation steps and tool limitations.
 2. **Deterministic risk authority:** Numerical review risk scores are computed deterministically; Gemini AI provides advisory explanations grounded on verified evidence.
 3. **Contract consistency:** Pydantic schemas enforce type safety without arbitrary unvalidated dictionaries.
+

@@ -1,8 +1,16 @@
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
+import pytest
 
 from app.main import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def mock_orchestrator_run():
+    with patch("app.api.repositories.orchestrator.run_pipeline", new_callable=AsyncMock) as m:
+        yield m
 
 
 def test_start_analysis_valid_request():

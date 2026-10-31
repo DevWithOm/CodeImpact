@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 
 try:
     from backend.app.services.repository.workspace import cleanup_workspace, create_workspace
@@ -156,6 +157,14 @@ def retrieve_repository(
     aid, workspace_path = create_workspace(analysis_id)
 
     try:
+        # Ensure workspace directory is empty before cloning so git clone does not fail
+        ws_obj = Path(workspace_path)
+        for child in ws_obj.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+
         # 4. Clone execution using shallow clone (--depth 1)
         clone_cmd = ["git", "clone", "--depth", "1"]
         if valid_branch:
@@ -178,6 +187,9 @@ def retrieve_repository(
                 + (f" on branch '{branch}'" if branch else "")
                 + f": {redact_secrets(error_msg)}"
             )
+
+        # Recreate standard report directory after clone
+        (Path(workspace_path) / ".codeimpact" / "reports").mkdir(parents=True, exist_ok=True)
 
         # 5. Extract Commit SHA
         sha_result = run_command(

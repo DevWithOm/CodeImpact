@@ -40,62 +40,75 @@ export const api = {
    * Triggers a new repository analysis.
    */
   async startAnalysis(repoUrl: string, branch = 'main'): Promise<{ analysisId: string; status: string }> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repository_url: repoUrl, branch })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          analysisId: data.analysis_id || data.analysisId || `an_${Date.now()}`,
-          status: data.status || 'queued'
-        };
-      }
-    } catch (err) {
-      console.warn('[CodeImpact API] Failed to trigger backend analysis, falling back to local simulation:', err);
+    let normalizedUrl = repoUrl.trim();
+    if (normalizedUrl && !normalizedUrl.startsWith('http://') && !normalizedUrl.startsWith('https://')) {
+      normalizedUrl = `https://github.com/${normalizedUrl}`;
     }
 
-    return {
-      analysisId: `an_${Date.now()}`,
-      status: 'queued'
-    };
+    const res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repository_url: normalizedUrl, branch })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        analysisId: data.analysis_id || data.analysisId,
+        status: data.status || 'queued'
+      };
+    }
+
+    const errJson = await res.json().catch(() => ({}));
+    const errMsg = errJson?.error?.message || `HTTP ${res.status}: Failed to submit repository analysis`;
+    throw new Error(errMsg);
   },
 
   /**
    * Retrieves status and summary metrics.
    */
   async getAnalysisStatus(analysisId: string): Promise<AnalysisSummary & { status?: string; currentStage?: string; stageProgress?: number; error?: string | null }> {
-    try {
-      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const m = data.metrics || {};
-        const total = m.total_findings ?? 0;
-        const health = total === 0 ? 'A+' : total < 5 ? 'A-' : total < 10 ? 'B+' : total < 20 ? 'B' : 'C';
+    const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`);
+    if (res.ok) {
+      const data = await res.json();
+      const m = data.metrics || {};
+      const total = m.total_findings ?? 0;
+      const dupCount = m.duplicate_groups ?? m.duplicate_code ?? 0;
+      const cycleCount = m.circular_dependencies ?? 0;
+      const unusedCount = m.potentially_unused ?? Math.max(0, total - dupCount - cycleCount);
+      const health = total === 0 ? 'A+' : total < 5 ? 'A-' : total < 10 ? 'B+' : total < 20 ? 'B' : 'C';
 
-        return {
-          repoUrl: data.repository_url || '',
-          branch: data.branch || 'main',
-          analyzedFiles: m.files_analyzed || m.total_files || 10,
-          totalFindings: total,
-          potentiallyUnusedCount: m.potentially_unused ?? 0,
-          duplicationClonesCount: m.duplicate_code ?? 0,
-          circularCyclesCount: m.circular_dependencies ?? 0,
-          hotspotRiskIndex: m.high_risk_findings ? Math.min(100, m.high_risk_findings * 25) : 0,
-          healthScore: health,
-          status: data.status,
-          currentStage: data.current_stage,
-          stageProgress: data.stage_progress,
-          error: data.error
-        };
-      }
-    } catch (err) {
-      console.warn(`[CodeImpact API] Status check failed for ${analysisId}:`, err);
+      return {
+        repoUrl: data.repository_url || (data.repository ? (data.repository.startsWith('http') ? data.repository : `https://github.com/${data.repository}`) : ''),
+        branch: data.branch || 'main',
+        analyzedFiles: m.files_analyzed || m.total_files || (data.repository ? 10 : 0),
+        totalFindings: total,
+        potentiallyUnusedCount: unusedCount,
+        duplicationClonesCount: dupCount,
+        circularCyclesCount: cycleCount,
+        hotspotRiskIndex: m.higher_risk ? Math.min(100, m.higher_risk * 25) : 0,
+        healthScore: health,
+        status: data.status,
+        currentStage: data.current_stage,
+        stageProgress: data.stage_progress,
+        error: data.error || data.error_message || null
+      };
     }
 
-    return DEFAULT_SUMMARY;
+    if (res.status === 404) {
+      return {
+        ...DEFAULT_SUMMARY,
+        status: 'failed',
+        error: `Analysis job '${analysisId}' was not found on the backend.`
+      };
+    }
+
+    const errJson = await res.json().catch(() => ({}));
+    return {
+      ...DEFAULT_SUMMARY,
+      status: 'failed',
+      error: errJson?.error?.message || `Backend error (HTTP ${res.status})`
+    };
   },
 
   /**

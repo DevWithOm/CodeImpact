@@ -77,6 +77,7 @@ class AnalysisRecord:
         return AnalysisStatusResponse(
             analysis_id=self.analysis_id,
             repository=self.repository,
+            repository_url=self.repository_url,
             branch=self.branch,
             commit_sha=self.commit_sha,
             status=self.status,

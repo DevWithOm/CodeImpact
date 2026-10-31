@@ -21,11 +21,21 @@ import { Finding, GraphNode, TerminalLog, ChatMessage, AnalysisSummary, ReviewSt
 import { api } from './services/api';
 
 export default function App() {
-  const [repoUrl, setRepoUrl] = useState('https://github.com/facebook/react');
+  const [repoUrl, setRepoUrl] = useState('https://github.com/DevWithOm/DeadCode-Detective');
   const [branch, setBranch] = useState('main');
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('System Idle - Ready for Scan');
+
+  const pollingIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, []);
 
   const [activeTab, setActiveTab] = useState('overview'); // overview, findings, graph, ai, matrix
   const [findings, setFindings] = useState<Finding[]>(INITIAL_FINDINGS);
@@ -52,6 +62,11 @@ export default function App() {
 
   // Trigger Live Scan
   const triggerLiveScan = async (customUrl?: string) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+
     const url = customUrl || repoUrl;
     setIsScanning(true);
     setScanProgress(5);
@@ -72,11 +87,15 @@ export default function App() {
       logMsg(`[QUEUE] Analysis created: ${newId} (status: ${initStatus})`, 'success');
 
       let attempts = 0;
+      let consecutiveNetworkErrors = 0;
       const maxAttempts = 90;
+
       const interval = setInterval(async () => {
         attempts++;
         try {
           const statusData = await api.getAnalysisStatus(newId);
+          consecutiveNetworkErrors = 0; // reset on successful communication
+
           const currentStatus = statusData.status || 'running';
           const stage = (statusData.currentStage || 'analyzing').replace('_', ' ');
           const pct = Math.min(95, statusData.stageProgress || 10 + attempts * 8);
@@ -85,7 +104,10 @@ export default function App() {
           setScanStatus(`Stage: ${stage.toUpperCase()} (${pct}%)`);
 
           if (currentStatus === 'completed' || currentStatus === 'partial') {
-            clearInterval(interval);
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
             logMsg(`[SUCCESS] Backend analysis completed (status: ${currentStatus.toUpperCase()})`, 'success');
 
             const [realFindings, realGraph, latestSummary] = await Promise.all([
@@ -119,21 +141,42 @@ export default function App() {
             setScanStatus('Analysis complete! Intelligence workspace updated.');
             setTimeout(() => setIsScanning(false), 500);
           } else if (currentStatus === 'failed') {
-            clearInterval(interval);
-            logMsg(`[ERROR] Analysis failed: ${statusData.error || 'Pipeline execution failed.'}`, 'error');
-            setScanStatus('Analysis failed. Please inspect terminal logs.');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            const failureDetail = statusData.error || 'Pipeline execution failed.';
+            logMsg(`[ERROR] Analysis failed: ${failureDetail}`, 'error');
+            setScanStatus(`Analysis failed: ${failureDetail}`);
             setIsScanning(false);
           } else if (attempts >= maxAttempts) {
-            clearInterval(interval);
-            logMsg('[TIMEOUT] Analysis polling timed out.', 'warn');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            logMsg('[TIMEOUT] Analysis polling timed out after 3 minutes.', 'warn');
+            setScanStatus('Analysis timed out.');
             setIsScanning(false);
           }
-        } catch (err) {
-          console.warn('[Polling Error]', err);
+        } catch (err: any) {
+          consecutiveNetworkErrors++;
+          console.warn(`[Polling Error ${consecutiveNetworkErrors}/5]`, err);
+          if (consecutiveNetworkErrors >= 5) {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            logMsg('[ERROR] Lost connection to backend server at http://localhost:8000. Scan aborted.', 'error');
+            setScanStatus('Backend server unreachable.');
+            setIsScanning(false);
+          }
         }
       }, 1500);
+
+      pollingIntervalRef.current = interval;
     } catch (err: any) {
       logMsg(`[ERROR] Failed to start analysis: ${err?.message || err}`, 'error');
+      setScanStatus(`Failed to start: ${err?.message || err}`);
       setIsScanning(false);
     }
   };
