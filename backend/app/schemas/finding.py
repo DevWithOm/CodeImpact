@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.app.schemas.evidence import EvidenceItem
+from backend.app.schemas.evidence import EvidenceItem, FindingImpact
 from backend.app.schemas.impact import (
     DirectDependant,
     EnrichedFinding,
@@ -18,6 +18,7 @@ FindingCategory = Literal[
     "unused_export",
     "unused_dependency",
     "duplicate_code",
+    "duplicate_block",
     "other",
 ]
 
@@ -71,12 +72,54 @@ class Finding(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class FindingItem(BaseModel):
+    """API-level finding item for frontend and reports."""
+    finding_id: str
+    category: str
+    title: str
+    file_path: str
+    start_line: int | None = None
+    end_line: int | None = None
+    symbol: str | None = None
+    source_tool: str
+    description: str
+    evidence_class: str = "inconclusive"
+    review_risk: str = "unknown"
+    evidence: list[Any] = Field(default_factory=list)
+    risk_factors: list[str] = Field(default_factory=list)
+    impact: Any | None = None
+
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
+
+
+class FindingDetail(FindingItem):
+    """Detailed finding view with analysis limitations."""
+    limitations: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class FindingsListResponse(BaseModel):
+    """Paginated findings response."""
+    analysis_id: str
+    items: list[FindingItem] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+    tool_coverage: dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="allow")
+
+
 __all__ = [
     "FindingCategory",
     "EvidenceClass",
     "ReviewRisk",
     "EvidenceItem",
     "Finding",
+    "FindingItem",
+    "FindingDetail",
+    "FindingsListResponse",
     "FindingEvidenceItem",
     "EnrichedFinding",
     "ImpactEvidence",

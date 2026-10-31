@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GraphNode(BaseModel):
@@ -16,6 +16,8 @@ class GraphNode(BaseModel):
     in_degree: int = Field(default=0, ge=0, description="Number of direct importers (dependants)")
     out_degree: int = Field(default=0, ge=0, description="Number of direct imports (dependencies)")
 
+    model_config = ConfigDict(extra="allow")
+
 
 class GraphEdge(BaseModel):
     """Represents a directed import edge (source imports target)."""
@@ -24,16 +26,20 @@ class GraphEdge(BaseModel):
     target: str = Field(description="Repository-relative path of imported module")
     relationship: str = Field(default="imports", description="Canonical edge relationship")
 
+    model_config = ConfigDict(extra="allow")
+
 
 class GraphStats(BaseModel):
     """Summary metrics of the complete and returned graph."""
-    node_count: int = Field(ge=0, description="Total nodes in the complete graph")
-    edge_count: int = Field(ge=0, description="Total directed edges in the complete graph")
-    cycle_count: int = Field(ge=0, description="Total unique detected cycles")
-    original_node_count: int = Field(ge=0, description="Total nodes prior to visualization truncation")
-    original_edge_count: int = Field(ge=0, description="Total edges prior to visualization truncation")
-    returned_node_count: int = Field(ge=0, description="Number of nodes returned in payload")
-    returned_edge_count: int = Field(ge=0, description="Number of edges returned in payload")
+    node_count: int = Field(default=0, ge=0, description="Total nodes in the complete graph")
+    edge_count: int = Field(default=0, ge=0, description="Total directed edges in the complete graph")
+    cycle_count: int = Field(default=0, ge=0, description="Total unique detected cycles")
+    original_node_count: int = Field(default=0, ge=0, description="Total nodes prior to visualization truncation")
+    original_edge_count: int = Field(default=0, ge=0, description="Total edges prior to visualization truncation")
+    returned_node_count: int = Field(default=0, ge=0, description="Number of nodes returned in payload")
+    returned_edge_count: int = Field(default=0, ge=0, description="Number of edges returned in payload")
+
+    model_config = ConfigDict(extra="allow")
 
 
 class GraphData(BaseModel):
@@ -41,14 +47,39 @@ class GraphData(BaseModel):
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     cycles: list[list[str]] = Field(default_factory=list)
-    stats: GraphStats
+    stats: GraphStats = Field(default_factory=GraphStats)
     truncated: bool = Field(default=False)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class GraphResponse(BaseModel):
+    """Graph response envelope consumed by API endpoints and frontend."""
+    analysis_id: str
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
+    cycles: list[list[str]] = Field(default_factory=list)
+    stats: GraphStats = Field(default_factory=GraphStats)
+    truncated: bool = False
+
+    model_config = ConfigDict(extra="allow")
 
 
 class DependencyGraphResponse(BaseModel):
     """Top-level response envelope for dependency graph analysis."""
     analysis_id: str
     status: str = Field(default="success", description="Overall execution status: 'success', 'partial', 'unavailable'")
-    graph: GraphData
+    graph: GraphData = Field(default_factory=GraphData)
     enriched_findings: list[dict[str, Any]] = Field(default_factory=list)
 
+    model_config = ConfigDict(extra="allow")
+
+
+__all__ = [
+    "GraphNode",
+    "GraphEdge",
+    "GraphStats",
+    "GraphData",
+    "GraphResponse",
+    "DependencyGraphResponse",
+]
