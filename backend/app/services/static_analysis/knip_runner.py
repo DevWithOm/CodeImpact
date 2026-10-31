@@ -33,6 +33,47 @@ def _find_knip_executable() -> str:
     return "knip"
 
 
+def get_knip_version() -> str:
+    """Returns the installed Knip CLI version.
+
+    Returns:
+        Version string (e.g. '5.45.0') or 'unknown'.
+    """
+    knip_bin = _find_knip_executable()
+    res = run_command(["node", knip_bin, "--version"], timeout=10)
+    if res.succeeded and res.stdout.strip():
+        return res.stdout.strip()
+    return "unknown"
+
+
+def run_knip(repo_path: str) -> dict[str, Any]:
+    """Runs Knip against a repository workspace and returns structured dictionary.
+
+    Args:
+        repo_path: Filesystem path to the target repository workspace.
+
+    Returns:
+        Dict with "findings" and "tool_coverage":
+        {
+            "findings": [...],
+            "tool_coverage": {
+                "knip": {
+                    "status": "completed" | "partial" | "failed" | "skipped",
+                    "finding_count": int,
+                    "message": str | None
+                }
+            }
+        }
+    """
+    findings, coverage = run_knip_analysis(repo_path)
+    return {
+        "findings": [f.model_dump() for f in findings],
+        "tool_coverage": {
+            "knip": coverage.model_dump(),
+        },
+    }
+
+
 def run_knip_analysis(
     repo_path: str,
     output_dir: str | None = None,
@@ -61,6 +102,13 @@ def run_knip_analysis(
             status="skipped",
             finding_count=0,
             message="No JavaScript or TypeScript files found to analyze with Knip.",
+        )
+
+    if not scan["has_package_json"]:
+        return [], ToolCoverageItem(
+            status="partial",
+            finding_count=0,
+            message="Repository lacks root package.json. Knip requires package.json for project configuration.",
         )
 
     knip_bin = _find_knip_executable()
@@ -103,17 +151,23 @@ def run_knip_analysis(
 
     raw_stdout = result.stdout.strip()
 
-    # Sometimes warnings appear before JSON output; locate JSON boundary
+    # Locate JSON boundary in stdout
     json_start = raw_stdout.find("{")
     json_end = raw_stdout.rfind("}")
 
     if json_start == -1 or json_end == -1:
+        error_msg = result.stderr.strip() or raw_stdout
         if result.exit_code != 0:
-            error_msg = result.stderr.strip() or raw_stdout
             return [], ToolCoverageItem(
                 status="failed",
                 finding_count=0,
                 message=f"Knip failed with exit code {result.exit_code}: {error_msg[:300]}",
+            )
+        if raw_stdout:
+            return [], ToolCoverageItem(
+                status="failed",
+                finding_count=0,
+                message=f"Failed to parse Knip JSON output: {raw_stdout[:300]}",
             )
         raw_data = {"files": [], "issues": []}
     else:
@@ -136,14 +190,8 @@ def run_knip_analysis(
     # Normalize findings
     findings = normalize_knip_findings(raw_data, repo_root=str(repo_path_obj))
 
-    status = "completed"
-    message = None
-    if not scan["has_package_json"]:
-        status = "partial"
-        message = "Analyzed without root package.json; dependency checks were skipped."
-
     return findings, ToolCoverageItem(
-        status=status,
+        status="completed",
         finding_count=len(findings),
-        message=message,
+        message=None,
     )
