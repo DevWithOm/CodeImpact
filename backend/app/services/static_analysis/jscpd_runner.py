@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import shutil
 from typing import Any
 
 from backend.app.schemas.analysis import ToolCoverageItem
@@ -31,6 +32,47 @@ def _find_jscpd_executable() -> str:
         return str(workspace_jscpd)
 
     return "jscpd"
+
+
+def get_jscpd_version() -> str:
+    """Returns the installed jscpd CLI version.
+
+    Returns:
+        Version string (e.g. '4.0.5') or 'unknown'.
+    """
+    jscpd_bin = _find_jscpd_executable()
+    res = run_command(["node", jscpd_bin, "--version"], timeout=10)
+    if res.succeeded and res.stdout.strip():
+        return res.stdout.strip()
+    return "unknown"
+
+
+def run_jscpd(repo_path: str) -> dict[str, Any]:
+    """Runs jscpd against a repository workspace and returns structured dictionary.
+
+    Args:
+        repo_path: Filesystem path to the target repository workspace.
+
+    Returns:
+        Dict with "findings" and "tool_coverage":
+        {
+            "findings": [...],
+            "tool_coverage": {
+                "jscpd": {
+                    "status": "completed" | "partial" | "failed" | "skipped",
+                    "finding_count": int,
+                    "message": str | None
+                }
+            }
+        }
+    """
+    findings, coverage = run_jscpd_analysis(repo_path)
+    return {
+        "findings": [f.model_dump() for f in findings],
+        "tool_coverage": {
+            "jscpd": coverage.model_dump(),
+        },
+    }
 
 
 def run_jscpd_analysis(
@@ -74,7 +116,11 @@ def run_jscpd_analysis(
     rel_reports_dir = Path(".codeimpact") / "reports" / "jscpd"
     abs_reports_dir = repo_path_obj / rel_reports_dir
     abs_reports_dir.mkdir(parents=True, exist_ok=True)
-    report_file = abs_reports_dir / "jscpd-report.json"
+    cli_report_file = abs_reports_dir / "jscpd-report.json"
+
+    # Target standard report file location (.codeimpact/reports/jscpd.json)
+    standard_report_file = repo_path_obj / ".codeimpact" / "reports" / "jscpd.json"
+    standard_report_file.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         "node",
@@ -104,7 +150,37 @@ def run_jscpd_analysis(
             message=f"jscpd execution timed out after {JSCPD_TIMEOUT_SECONDS}s",
         )
 
-    if not report_file.exists():
+    if result.exit_code != 0 and not cli_report_file.exists():
+        error_msg = result.stderr.strip() or result.stdout.strip()
+        return [], ToolCoverageItem(
+            status="failed",
+            finding_count=0,
+            message=f"jscpd failed with exit code {result.exit_code}: {error_msg[:300]}",
+        )
+
+    # When jscpd finds 0 duplicates, it completes successfully and prints detection time, but creates no report file
+    if not cli_report_file.exists():
+        if result.exit_code == 0 and "Detection time" in result.stdout:
+            empty_report = {
+                "duplicates": [],
+                "statistics": {
+                    "total": {
+                        "lines": 0,
+                        "tokens": 0,
+                        "clones": 0,
+                        "duplicatedLines": 0,
+                    }
+                },
+            }
+            try:
+                standard_report_file.write_text(json.dumps(empty_report, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+            return [], ToolCoverageItem(
+                status="completed",
+                finding_count=0,
+                message=None,
+            )
         error_msg = result.stderr.strip() or result.stdout.strip()
         return [], ToolCoverageItem(
             status="failed",
@@ -113,12 +189,15 @@ def run_jscpd_analysis(
         )
 
     try:
-        report_data = json.loads(report_file.read_text(encoding="utf-8"))
+        report_text = cli_report_file.read_text(encoding="utf-8")
+        report_data = json.loads(report_text)
+        # Persist standard report file at .codeimpact/reports/jscpd.json
+        standard_report_file.write_text(report_text, encoding="utf-8")
     except (json.JSONDecodeError, OSError) as exc:
         return [], ToolCoverageItem(
             status="failed",
             finding_count=0,
-            message=f"Failed to parse jscpd-report.json: {str(exc)}",
+            message=f"Failed to parse jscpd report JSON: {str(exc)}",
         )
 
     findings = normalize_jscpd_findings(report_data, repo_root=str(repo_path_obj))

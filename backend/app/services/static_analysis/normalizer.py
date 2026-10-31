@@ -3,6 +3,7 @@
 Translates raw tool outputs into uniform CodeImpact Finding objects.
 """
 
+from collections import defaultdict
 import hashlib
 import os
 from pathlib import Path
@@ -30,7 +31,6 @@ def _normalize_path(file_path: str, repo_root: str | None = None) -> str:
                 rel = p.resolve().relative_to(root_resolved)
                 return rel.as_posix()
             else:
-                # If relative, check if it starts with the repo directory name
                 parts = p.parts
                 root_name = root_resolved.name
                 if parts and parts[0] == root_name:
@@ -40,7 +40,6 @@ def _normalize_path(file_path: str, repo_root: str | None = None) -> str:
     # Normalize slashes and strip leading ./
     normalized = file_path.replace("\\", "/").lstrip("./")
     if repo_root:
-        # Strip repo base name prefix if present
         root_name = Path(repo_root).name
         if normalized.startswith(f"{root_name}/"):
             normalized = normalized[len(root_name) + 1 :]
@@ -210,20 +209,22 @@ def normalize_jscpd_findings(
 ) -> list[Finding]:
     """Transforms raw jscpd JSON output into standardized Finding objects.
 
-    Extracts duplicate code blocks, comparing firstFile and secondFile.
+    Groups matching locations for duplicate blocks and preserves all reported coordinates.
     """
-    findings: list[Finding] = []
     duplicates = raw_jscpd_data.get("duplicates", [])
+    if not duplicates:
+        return []
+
+    # Map connected duplicate locations by fragment or pairwise relations
+    # We group pairs that share identical fragment or connect overlapping locations
+    groups: list[dict[str, Any]] = []
 
     for dup in duplicates:
         first_file = dup.get("firstFile", {})
         second_file = dup.get("secondFile", {})
 
-        first_path_raw = first_file.get("name") or ""
-        second_path_raw = second_file.get("name") or ""
-
-        first_path = _normalize_path(first_path_raw, repo_root)
-        second_path = _normalize_path(second_path_raw, repo_root)
+        first_path = _normalize_path(first_file.get("name") or "", repo_root)
+        second_path = _normalize_path(second_file.get("name") or "", repo_root)
 
         first_start = first_file.get("start") or first_file.get("startLoc", {}).get("line")
         first_end = first_file.get("end") or first_file.get("endLoc", {}).get("line")
@@ -231,23 +232,89 @@ def normalize_jscpd_findings(
         second_start = second_file.get("start") or second_file.get("startLoc", {}).get("line")
         second_end = second_file.get("end") or second_file.get("endLoc", {}).get("line")
 
+        loc1 = (first_path, int(first_start) if first_start is not None else None, int(first_end) if first_end is not None else None)
+        loc2 = (second_path, int(second_start) if second_start is not None else None, int(second_end) if second_end is not None else None)
+
         lines_count = dup.get("lines")
+        tokens_count = dup.get("tokens")
         fragment = dup.get("fragment", "")
         format_name = dup.get("format", "unknown")
 
-        finding_id = _generate_finding_id("dup", f"{first_path}:{first_start}:{second_path}:{second_start}")
+        # Check if this duplicate merges with an existing group
+        merged = False
+        for grp in groups:
+            # Match if fragment is identical or either location matches an existing location in the group
+            if (fragment and grp["fragment"] == fragment) or (loc1 in grp["locations"] or loc2 in grp["locations"]):
+                grp["locations"].add(loc1)
+                grp["locations"].add(loc2)
+                if not grp["fragment"] and fragment:
+                    grp["fragment"] = fragment
+                if lines_count:
+                    grp["lines"] = lines_count
+                if tokens_count:
+                    grp["tokens"] = tokens_count
+                merged = True
+                break
+
+        if not merged:
+            groups.append({
+                "locations": {loc1, loc2},
+                "lines": lines_count,
+                "tokens": tokens_count,
+                "fragment": fragment,
+                "format": format_name,
+            })
+
+    findings: list[Finding] = []
+
+    for grp in groups:
+        # Sort locations deterministically: by file path then start line
+        sorted_locs = sorted(
+            list(grp["locations"]),
+            key=lambda x: (x[0], x[1] if x[1] is not None else -1)
+        )
+        if not sorted_locs:
+            continue
+
+        primary = sorted_locs[0]
+        primary_path, primary_start, primary_end = primary
+        other_locs = sorted_locs[1:]
+
+        # Deterministic finding ID
+        dup_id_key = f"{primary_path}:{primary_start}:{len(other_locs)}:{other_locs[0][0] if other_locs else ''}"
+        finding_id = _generate_finding_id("dup", dup_id_key)
+
+        matching_paths = [l[0] for l in other_locs]
+        matching_str = ", ".join(matching_paths)
+        lines_label = f"{grp['lines']} lines" if grp["lines"] else "matching code"
+        tokens_label = f", {grp['tokens']} tokens" if grp["tokens"] else ""
+
+        other_locations_meta = [
+            {
+                "file_path": l[0],
+                "start_line": l[1],
+                "end_line": l[2],
+            }
+            for l in other_locs
+        ]
+
+        desc = (
+            f"Duplicate code block ({lines_label}{tokens_label}) also found in {len(other_locs)} other location(s): {matching_str}."
+            if other_locs
+            else f"Duplicate code block ({lines_label}) detected."
+        )
 
         findings.append(
             Finding(
                 finding_id=finding_id,
                 category="duplicate_code",
                 title="Duplicate code block",
-                file_path=first_path,
-                start_line=int(first_start) if first_start is not None else None,
-                end_line=int(first_end) if first_end is not None else None,
+                file_path=primary_path,
+                start_line=primary_start,
+                end_line=primary_end,
                 symbol=None,
                 source_tool="jscpd",
-                description=f"Duplicate code block ({lines_count or 'matching'} lines) also found in {second_path}.",
+                description=desc,
                 evidence_class="strong",
                 review_risk="unknown",
                 evidence=[
@@ -255,29 +322,29 @@ def normalize_jscpd_findings(
                         kind="duplicate_block",
                         status="found",
                         source="jscpd",
-                        details=f"Identical or near-identical code lines detected between {first_path} (L{first_start}-L{first_end}) and {second_path} (L{second_start}-L{second_end}).",
+                        details=f"Identical or near-identical code lines detected across {len(sorted_locs)} locations.",
                         value={
-                            "duplicate_lines": lines_count,
-                            "format": format_name,
+                            "duplicate_lines": grp["lines"],
+                            "tokens": grp["tokens"],
+                            "format": grp["format"],
+                            "matching_location_count": len(other_locs),
                         },
                     )
                 ],
                 risk_factors=[
-                    "Shared logic may lead to maintenance fragmentation if updated inconsistently."
+                    "Duplicated logic increases maintenance overhead and risk of inconsistent updates."
                 ],
                 metadata={
-                    "format": format_name,
-                    "duplicate_locations": [
-                        {
-                            "file_path": second_path,
-                            "start_line": int(second_start) if second_start is not None else None,
-                            "end_line": int(second_end) if second_end is not None else None,
-                        }
-                    ],
-                    "duplicate_lines": lines_count,
-                    "fragment_preview": fragment[:200] if fragment else None,
+                    "format": grp["format"],
+                    "duplicate_locations": other_locations_meta,
+                    "duplicate_lines": grp["lines"],
+                    "tokens": grp["tokens"],
+                    "fragment_preview": grp["fragment"][:200] if grp["fragment"] else None,
+                    "duplicate_group_size": len(sorted_locs),
                 },
             )
         )
 
+    # Sort findings by file path and start line
+    findings.sort(key=lambda f: (f.file_path, f.start_line if f.start_line is not None else 0))
     return findings
