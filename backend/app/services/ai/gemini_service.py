@@ -13,6 +13,8 @@ from app.services.ai.prompt_templates import (
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 
 class AIServiceUnavailableError(Exception):
     """Raised when the Gemini AI explanation service is unavailable or unconfigured."""
@@ -28,11 +30,11 @@ class GeminiService:
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: Any = _UNSET,
         model: str | None = None,
         client: Any | None = None,
     ) -> None:
-        self.api_key = api_key if api_key is not None else settings.gemini_api_key
+        self.api_key = settings.gemini_api_key if api_key is _UNSET else api_key
         self.model = model if model is not None else settings.gemini_model
         self._client = client
 

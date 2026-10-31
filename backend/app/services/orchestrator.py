@@ -1,24 +1,43 @@
+from __future__ import annotations
+
 import logging
 from typing import Any
+import uuid
 
-from app.adapters.base import (
-    DependencyImpactAdapterProtocol,
-    RepositoryAdapterProtocol,
-    StaticAnalysisAdapterProtocol,
-)
-from app.adapters.dependency_impact_adapter import DependencyImpactAdapter
-from app.adapters.repository_adapter import RepositoryAdapter
-from app.adapters.static_analysis_adapter import StaticAnalysisAdapter
-from app.schemas.analysis import AnalysisStatus
-from app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
-from app.schemas.finding import FindingItem
-from app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
-from app.services.analysis_store import AnalysisStore, analysis_store as default_store
+try:
+    from backend.app.adapters.base import (
+        DependencyImpactAdapterProtocol,
+        RepositoryAdapterProtocol,
+        StaticAnalysisAdapterProtocol,
+    )
+    from backend.app.adapters.dependency_impact_adapter import DependencyImpactAdapter
+    from backend.app.adapters.repository_adapter import RepositoryAdapter
+    from backend.app.adapters.static_analysis_adapter import StaticAnalysisAdapter
+    from backend.app.schemas.analysis import AnalysisRequest, AnalysisStatus
+    from backend.app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
+    from backend.app.schemas.finding import FindingItem
+    from backend.app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
+    from backend.app.services.analysis_store import AnalysisStore, analysis_store as default_store
+except ImportError:
+    from app.adapters.base import (
+        DependencyImpactAdapterProtocol,
+        RepositoryAdapterProtocol,
+        StaticAnalysisAdapterProtocol,
+    )
+    from app.adapters.dependency_impact_adapter import DependencyImpactAdapter
+    from app.adapters.repository_adapter import RepositoryAdapter
+    from app.adapters.static_analysis_adapter import StaticAnalysisAdapter
+    from app.schemas.analysis import AnalysisRequest, AnalysisStatus
+    from app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
+    from app.schemas.finding import FindingItem
+    from app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
+    from app.services.analysis_store import AnalysisStore, analysis_store as default_store
 
 logger = logging.getLogger(__name__)
 
 
 def normalize_finding_dict(item: dict[str, Any]) -> FindingItem:
+    """Normalize finding dictionaries from static analysis and dependency impact engines into FindingItem."""
     evidence_list = []
     for ev in item.get("evidence", []):
         if isinstance(ev, dict):
@@ -46,10 +65,59 @@ def normalize_finding_dict(item: dict[str, Any]) -> FindingItem:
         )
     elif isinstance(raw_impact, FindingImpact):
         impact_obj = raw_impact
+    elif "direct_dependants" in item or "test_impact" in item:
+        # Synthesize FindingImpact from SAMAR_3 enriched finding
+        raw_direct = [
+            d.get("file_path", "") if isinstance(d, dict) else str(d)
+            for d in item.get("direct_dependants", [])
+        ]
+        raw_direct = [p for p in raw_direct if p]
+        test_impact_data = item.get("test_impact") or {}
+        raw_candidates = test_impact_data.get("candidate_tests", [])
+        test_candidates = [
+            TestCandidate(
+                file_path=c.get("file_path", "") if isinstance(c, dict) else getattr(c, "file_path", ""),
+                reason=c.get("reason", "Potential test relationship") if isinstance(c, dict) else getattr(c, "reason", ""),
+                mapping_strength=c.get("mapping_status", "direct") if isinstance(c, dict) else getattr(c, "mapping_status", "direct"),
+            )
+            for c in raw_candidates if (isinstance(c, dict) or hasattr(c, "file_path"))
+        ]
+        impact_obj = FindingImpact(
+            direct_dependants=raw_direct,
+            dependency_count=len(raw_direct),
+            cycle_member=bool(item.get("cycle_member", False)),
+            related_test_candidates=test_candidates,
+            risk_factors=item.get("risk_factors", []),
+            review_risk=str(item.get("review_risk", "unknown")),
+        )
 
-    return FindingItem(
+    raw_category = item.get("category", "unknown")
+    if hasattr(raw_category, "value"):
+        category_str = str(raw_category.value)
+    else:
+        category_str = str(raw_category)
+        if category_str.startswith("FindingCategory."):
+            category_str = category_str.split(".", 1)[1].lower()
+
+    raw_ev_class = item.get("evidence_class", "inconclusive")
+    if hasattr(raw_ev_class, "value"):
+        evidence_class_str = str(raw_ev_class.value)
+    else:
+        evidence_class_str = str(raw_ev_class)
+        if evidence_class_str.startswith("EvidenceClass."):
+            evidence_class_str = evidence_class_str.split(".", 1)[1].lower()
+
+    raw_risk = item.get("review_risk", "unknown")
+    if hasattr(raw_risk, "value"):
+        risk_str = str(raw_risk.value)
+    else:
+        risk_str = str(raw_risk)
+        if risk_str.startswith("ReviewRisk."):
+            risk_str = risk_str.split(".", 1)[1].lower()
+
+    finding_item = FindingItem(
         finding_id=str(item.get("finding_id", "f_unknown")),
-        category=str(item.get("category", "unknown")),
+        category=category_str,
         title=str(item.get("title", "Finding")),
         file_path=str(item.get("file_path", "")),
         start_line=item.get("start_line"),
@@ -57,15 +125,38 @@ def normalize_finding_dict(item: dict[str, Any]) -> FindingItem:
         symbol=item.get("symbol"),
         source_tool=str(item.get("source_tool", "analyzer")),
         description=str(item.get("description", "")),
-        evidence_class=str(item.get("evidence_class", "inconclusive")),
-        review_risk=str(item.get("review_risk", "unknown")),
+        evidence_class=evidence_class_str,
+        review_risk=risk_str,
         evidence=evidence_list,
         risk_factors=item.get("risk_factors", []),
         impact=impact_obj,
     )
 
+    # Preserve SAMAR_3 review-risk and impact attributes on the model
+    for k in (
+        "risk_score",
+        "risk_confidence",
+        "risk_assessment",
+        "test_impact",
+        "direct_dependants",
+        "direct_dependencies",
+        "cycle_member",
+        "cycles",
+        "self_dependency_detected",
+        "mapping_status",
+        "impact_status",
+    ):
+        if k in item:
+            setattr(finding_item, k, item[k])
+
+    return finding_item
+
 
 def normalize_graph_dict(analysis_id: str, raw_graph: dict[str, Any]) -> GraphResponse:
+    """Normalize graph structures from Phase 3 into standard GraphResponse."""
+    if "graph" in raw_graph and isinstance(raw_graph["graph"], dict):
+        raw_graph = raw_graph["graph"]
+
     raw_nodes = raw_graph.get("nodes", [])
     nodes = []
     for n in raw_nodes:
@@ -118,6 +209,25 @@ class AnalysisOrchestrator:
         self.repo_adapter = repo_adapter or RepositoryAdapter()
         self.static_adapter = static_adapter or StaticAnalysisAdapter()
         self.dependency_adapter = dependency_adapter or DependencyImpactAdapter()
+
+    async def run_analysis(self, request: AnalysisRequest) -> dict[str, Any]:
+        """Programmatic end-to-end execution of the full analysis pipeline."""
+        analysis_id = f"an_{uuid.uuid4().hex[:8]}"
+        self.store.create_analysis(analysis_id=analysis_id, request=request)
+        await self.run_pipeline(analysis_id)
+        record = self.store.get_record(analysis_id)
+        if record is None:
+            return {"analysis_id": analysis_id, "status": "failed", "error": "Analysis record missing"}
+
+        return {
+            "analysis_id": analysis_id,
+            "status": record.status.value if hasattr(record.status, "value") else str(record.status),
+            "repository": record.to_status_response().model_dump(),
+            "findings": [f.model_dump() for f in record.findings],
+            "graph": record.graph.model_dump() if record.graph else None,
+            "metrics": record.metrics.model_dump(),
+            "tool_coverage": record.tool_coverage,
+        }
 
     async def run_pipeline(self, analysis_id: str) -> None:
         """Executes the analysis pipeline in the background."""
@@ -183,7 +293,7 @@ class AnalysisOrchestrator:
                 logger.warning("Static analysis failed for %s: %s", analysis_id, exc)
                 tool_coverage["static_analysis"] = "failed"
 
-            # Stage 3: Dependency Graph & Impact (Madge)
+            # Stage 3: Dependency Graph & Impact (Madge, Cycle Detector, Impact, Test Mapper, Risk Scorer)
             self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="dependency_graph")
             raw_graph: dict[str, Any] = {}
             try:

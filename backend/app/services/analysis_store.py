@@ -3,14 +3,24 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import threading
 
-from app.schemas.analysis import (
-    AnalysisMetrics,
-    AnalysisRequest,
-    AnalysisStatus,
-    AnalysisStatusResponse,
-)
-from app.schemas.finding import FindingDetail, FindingItem, FindingsListResponse
-from app.schemas.graph import GraphResponse, GraphStats
+try:
+    from backend.app.schemas.analysis import (
+        AnalysisMetrics,
+        AnalysisRequest,
+        AnalysisStatus,
+        AnalysisStatusResponse,
+    )
+    from backend.app.schemas.finding import FindingDetail, FindingItem, FindingsListResponse
+    from backend.app.schemas.graph import GraphResponse, GraphStats
+except ImportError:
+    from app.schemas.analysis import (
+        AnalysisMetrics,
+        AnalysisRequest,
+        AnalysisStatus,
+        AnalysisStatusResponse,
+    )
+    from app.schemas.finding import FindingDetail, FindingItem, FindingsListResponse
+    from app.schemas.graph import GraphResponse, GraphStats
 
 
 def compute_metrics(findings: list[FindingItem], graph: GraphResponse | None = None) -> AnalysisMetrics:
@@ -18,12 +28,18 @@ def compute_metrics(findings: list[FindingItem], graph: GraphResponse | None = N
     medium = sum(1 for f in findings if getattr(f, "review_risk", None) == "medium")
     lower = sum(1 for f in findings if getattr(f, "review_risk", None) == "lower")
     unknown = sum(1 for f in findings if getattr(f, "review_risk", None) in ("unknown", None, ""))
-    duplicates = sum(1 for f in findings if getattr(f, "category", None) == "duplicate_block")
+    duplicates = sum(1 for f in findings if getattr(f, "category", None) in ("duplicate_block", "duplicate_code"))
 
     test_candidates = 0
     for f in findings:
-        if getattr(f, "impact", None) and getattr(f.impact, "related_test_candidates", None):
-            test_candidates += len(f.impact.related_test_candidates)
+        impact = getattr(f, "impact", None)
+        if impact and getattr(impact, "related_test_candidates", None):
+            test_candidates += len(impact.related_test_candidates)
+        elif getattr(f, "test_impact", None):
+            ti = getattr(f, "test_impact")
+            candidates = getattr(ti, "related_test_candidates", None) or getattr(ti, "direct_test_files", None)
+            if candidates:
+                test_candidates += len(candidates)
 
     cycles = len(graph.cycles) if graph and hasattr(graph, "cycles") else 0
 

@@ -24,20 +24,16 @@ class RepositoryAdapter(RepositoryAdapterProtocol):
         branch: str,
         analysis_id: str,
     ) -> dict[str, Any]:
-        """
-        Attempts to call Person 2's repository retrieval function if available.
-        Otherwise raises IntegrationPendingError.
-        """
+        """Calls Person 2 (OM_2) repository retrieval service."""
         try:
-            from app.services.static_analysis import analyzer  # type: ignore
+            from backend.app.services.repository.github_service import retrieve_repository
+        except ImportError:
+            from app.services.repository.github_service import retrieve_repository
 
-            if hasattr(analyzer, "retrieve_repository") and callable(analyzer.retrieve_repository):
-                return analyzer.retrieve_repository(repository_url, branch, analysis_id)
-        except (ImportError, AttributeError) as exc:
-            logger.info("Person 2 repository retrieval module not available yet: %s", exc)
-
-        raise IntegrationPendingError(
-            f"Repository retrieval module (Person 2 - OM_2) is pending implementation for analysis {analysis_id}."
+        return retrieve_repository(
+            repository_url=repository_url,
+            branch=branch,
+            analysis_id=analysis_id,
         )
 
     def cleanup_workspace(self, workspace_path: str) -> None:
