@@ -125,3 +125,4 @@ Final findings count: 19
 ## 7. Final Verdict
 
 **FIXED** — Repository scanning no longer stalls at 5%. The submission returns in milliseconds, background analysis runs asynchronously without blocking the event loop, real-time stage progress is streamed to the UI, and actual analysis results are rendered in the frontend dashboard.
+
