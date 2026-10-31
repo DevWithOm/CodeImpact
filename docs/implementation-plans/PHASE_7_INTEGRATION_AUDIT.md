@@ -75,3 +75,4 @@ This audit establishes the baseline status of all integration boundaries, detail
 1. **Zero Execution of Untrusted Target Code**: Knip, jscpd, and Madge are run via pinned Node binaries in `tooling/` with strict subprocess limits (`shell=False`, bounded timeout, bounded stdout). Target code/tests/scripts are NEVER executed.
 2. **Path Sanitization**: All file paths are normalized POSIX repository-relative paths (`/`). Directory traversal (`..`) and absolute host paths are rejected.
 3. **Workspace Isolation**: Each analysis allocates a unique timestamped UUID workspace inside the system temporary directory. Workspaces are cleaned up in `finally` blocks.
+

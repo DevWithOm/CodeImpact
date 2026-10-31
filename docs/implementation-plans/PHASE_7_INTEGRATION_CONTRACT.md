@@ -123,3 +123,4 @@ class DependencyImpactAdapterProtocol(Protocol):
 4. **Deterministic Risk Scoring:** Mathematical review-risk scoring (0–100) is calculated strictly by SAMAR_3's deterministic formula. Gemini AI is strictly advisory and cannot alter scores.
 5. **Path Traversal Protection:** All paths are sanitized, validated against workspace boundaries, and disallowed from escaping sandbox roots.
 6. **Isolated Workspaces:** Temporary directories are created with unique UUIDs and guaranteed to be deleted in the orchestrator `finally` block.
+

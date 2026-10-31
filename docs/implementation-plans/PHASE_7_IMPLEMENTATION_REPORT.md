@@ -67,3 +67,4 @@ All services operate through standardized adapters conforming to runtime protoco
 | `repository` / `static_analysis` | OM_2 | URL validation, git clone, Knip, jscpd, finding generation. |
 | `dependency_impact` | SAMAR_3 | Madge runner, dependency graph, impact analysis, test mapping, review-risk engine. |
 | `orchestrator` / `ai` / `reports` | TANUJA_4 | Lifecycle management, in-memory store, Gemini explanations, markdown/JSON reports. |
+

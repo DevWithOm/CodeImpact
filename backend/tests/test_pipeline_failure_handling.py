@@ -225,3 +225,4 @@ def test_branch_name_security_validation_guards():
     # Valid branch passes
     assert validate_branch_name("feature/safe-branch-v1") == "feature/safe-branch-v1"
     assert validate_branch_name(None) is None
+
