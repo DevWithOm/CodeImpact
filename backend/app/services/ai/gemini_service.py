@@ -17,7 +17,7 @@ _UNSET = object()
 
 
 class AIServiceUnavailableError(Exception):
-    """Raised when the Gemini AI explanation service is unavailable or unconfigured."""
+    """Raised when the Gemini/Gemma AI explanation service is unavailable or unconfigured."""
 
     def __init__(self, message: str = "AI explanation service is unavailable.") -> None:
         super().__init__(message)
@@ -26,7 +26,7 @@ class AIServiceUnavailableError(Exception):
 
 
 class GeminiService:
-    """Service for generating evidence-grounded finding explanations using Google Gemini."""
+    """Service for generating evidence-grounded finding explanations using Google Gemini / Gemma."""
 
     def __init__(
         self,
@@ -42,13 +42,13 @@ class GeminiService:
             try:
                 from google import genai
                 self._client = genai.Client(api_key=self.api_key.strip())
-                logger.info("Initialized Gemini client with model %s", self.model)
+                logger.info("Initialized AI client with model %s", self.model)
             except Exception as exc:
                 logger.warning("Failed to initialize Google GenAI client: %s", exc)
                 self._client = None
 
     def is_available(self) -> bool:
-        """Returns True if the Gemini client is configured and initialized."""
+        """Returns True if the AI client is configured and initialized."""
         return self._client is not None
 
     async def explain_finding(
@@ -63,7 +63,7 @@ class GeminiService:
         """
         if not self.is_available():
             if fallback_on_error:
-                logger.info("Gemini not configured; returning deterministic fallback explanation.")
+                logger.info("AI client not configured; returning deterministic fallback explanation.")
                 data = generate_deterministic_fallback(finding)
                 return ExplainResponse(**data)
             raise AIServiceUnavailableError(
@@ -75,19 +75,26 @@ class GeminiService:
         try:
             from google.genai import types
 
-            response = self._client.models.generate_content(
-                model=self.model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=ExplainResponse,
-                    temperature=0.2,
-                ),
-            )
+            response = None
+            try:
+                response = self._client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                    ),
+                )
+            except Exception as json_err:
+                logger.info("JSON-mode generation failed (%s), trying basic generation", json_err)
+                response = self._client.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                )
 
             raw_text = getattr(response, "text", "") or ""
             if not raw_text.strip():
-                raise ValueError("Received empty response from Gemini API.")
+                raise ValueError("Received empty response from AI model.")
 
             # Attempt direct parse
             try:
@@ -99,12 +106,17 @@ class GeminiService:
                 if match:
                     parsed = json.loads(match.group(1))
                     return ExplainResponse(**parsed)
+                # Fallback regex for raw JSON object
+                match_raw = re.search(r"(\{.*\})", raw_text, re.DOTALL)
+                if match_raw:
+                    parsed = json.loads(match_raw.group(1))
+                    return ExplainResponse(**parsed)
                 raise
 
         except Exception as exc:
-            logger.warning("Gemini generation failed for finding %s: %s", finding.finding_id, exc)
+            logger.warning("AI model generation failed for finding %s: %s", finding.finding_id, exc)
             if fallback_on_error:
-                logger.info("Returning deterministic fallback explanation due to error.")
+                logger.info("Returning deterministic fallback explanation due to model error.")
                 return ExplainResponse(**generate_deterministic_fallback(finding))
             raise AIServiceUnavailableError(
                 f"Failed to generate AI explanation: {exc}"
