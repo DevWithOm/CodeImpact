@@ -97,7 +97,35 @@ cd ..
 
 ---
 
-## 5. Running the Application
+## 5. Environment Variables (.env)
+
+Both the backend and frontend are pre-configured to run out of the box with zero external dependencies, but support environment customizations:
+
+### Backend Configuration (`backend/.env`)
+
+| Variable | Default Value | Required | Description |
+|---|---|---|---|
+| `APP_NAME` | `"CodeImpact API"` | No | Display title for the backend service. |
+| `APP_ENV` / `ENVIRONMENT` | `development` | No | Application environment mode (`development`, `production`). |
+| `API_PREFIX` | `/api` | No | Route prefix for all REST endpoints. |
+| `HOST` / `BACKEND_HOST` | `127.0.0.1` | No | Host interface IP for Uvicorn binding. |
+| `PORT` / `BACKEND_PORT` | `8000` | No | HTTP port for Uvicorn binding. |
+| `FRONTEND_ORIGIN` | `http://localhost:3000,http://localhost:5173` | No | Allowed CORS origins for browser security. |
+| `GEMINI_API_KEY` | *(None)* | Optional | API key from [Google AI Studio](https://aistudio.google.com/) for live AI explanations. |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | No | Google model name for code review explanations. |
+| `MAX_REPO_SIZE_MB` | `200.0` | No | Maximum repository size in megabytes before aborting clone. |
+| `MAX_FILE_COUNT` | `10000` | No | Maximum non-ignored file count permitted in target repository. |
+| `SUBPROCESS_TIMEOUT_SECONDS` | `180` | No | Subprocess execution timeout in seconds. |
+
+### Frontend Configuration (`frontend/.env`)
+
+| Variable | Default Value | Required | Description |
+|---|---|---|---|
+| `VITE_API_URL` | `http://localhost:8000` | No | Base URL for FastAPI backend connection. |
+
+---
+
+## 6. Running the Application
 
 ### Start Backend API Server
 From repository root:
@@ -117,11 +145,11 @@ From repository root in a separate terminal:
 cd frontend
 npm run dev
 ```
-- Frontend UI Dashboard: `http://localhost:3000`
+- Frontend UI Dashboard: `http://localhost:5173`
 
 ---
 
-## 6. API Endpoints
+## 7. API Endpoints
 
 | Method | Endpoint | Description | Status Code |
 | :--- | :--- | :--- | :--- |
@@ -136,7 +164,7 @@ npm run dev
 
 ---
 
-## 7. Testing Instructions
+## 8. Testing Instructions
 
 Run the complete automated test suite across all four teammate modules (296 tests):
 ```bash
@@ -159,7 +187,7 @@ Test coverage includes:
 
 ---
 
-## 8. Security & Hardening Boundaries
+## 9. Security & Hardening Boundaries
 
 CodeImpact executes analysis against untrusted external repositories. Strict security controls are enforced:
 1. **No Code Execution:** Repository code or build scripts are NEVER executed. `npm install` is NEVER run inside analyzed repositories.
@@ -171,13 +199,13 @@ CodeImpact executes analysis against untrusted external repositories. Strict sec
 
 ---
 
-## 9. Known Limitations
+## 10. Known Limitations
 
 - **Private Repositories:** MVP supports public GitHub HTTPS repositories. Authenticated private repository support requires PAT or GitHub App configuration.
 - **Dynamic References:** Static analysis cannot guarantee that an export is unreachable if it is resolved dynamically at runtime (e.g. `import(`./plugins/${name}`)`). Findings are marked as `inconclusive` evidence and require developer review.
 
 ---
 
-## 10. License
+## 11. License
 
 This project is licensed under the terms of the [MIT License](LICENSE).

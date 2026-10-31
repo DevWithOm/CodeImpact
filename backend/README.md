@@ -142,7 +142,58 @@ Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
 ---
 
-## 7. Setup & Local Run
+## 7. Environment Variables (.env)
+
+The backend reads configuration settings from a `.env` file located in `backend/.env` via Pydantic Settings ([`backend/app/core/config.py`](file:///C:/Users/ASUS/Desktop/DeadCode-Detective/backend/app/core/config.py)).
+
+To initialize your local environment:
+```bash
+cp .env.example .env
+```
+
+### Configuration Reference Table
+
+| Variable | Default Value | Required | Description |
+|---|---|---|---|
+| `APP_NAME` | `"CodeImpact API"` | No | Application display title shown in Swagger UI and API health probes. |
+| `APP_ENV` / `ENVIRONMENT` | `development` | No | Deployment environment (`development`, `staging`, `production`). |
+| `API_PREFIX` | `/api` | No | Base routing prefix for all REST API endpoints. |
+| `HOST` / `BACKEND_HOST` | `127.0.0.1` | No | Server interface binding IP (`0.0.0.0` for all interfaces). |
+| `PORT` / `BACKEND_PORT` | `8000` | No | Server HTTP listening port. |
+| `FRONTEND_ORIGIN` | `http://localhost:3000,http://localhost:5173` | No | Comma-separated list of allowed origins for browser CORS policy. |
+| `GEMINI_API_KEY` | *(None)* | Optional | Google Gemini API key from [Google AI Studio](https://aistudio.google.com/) for live AI explanations. If omitted, the system gracefully falls back to deterministic AST explanations. |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | No | Model identifier for AI explanations (`gemini-2.5-flash`, `gemma-4-it`). |
+| `MAX_REPO_SIZE_MB` | `200.0` | No | Maximum allowed repository disk footprint (MB) before retrieval aborts. |
+| `MAX_FILE_COUNT` | `10000` | No | Maximum non-ignored file count permitted in target repositories. |
+| `SUBPROCESS_TIMEOUT_SECONDS` | `180` | No | Hard process execution timeout for Git, Knip, jscpd, and Madge subprocesses. |
+
+### Example `.env` File
+
+```ini
+# CodeImpact Backend Environment Configuration
+APP_NAME="CodeImpact API"
+APP_ENV=development
+ENVIRONMENT=development
+API_PREFIX=/api
+HOST=127.0.0.1
+PORT=8000
+BACKEND_HOST=127.0.0.1
+BACKEND_PORT=8000
+FRONTEND_ORIGIN=http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173
+
+# AI Explanation Service (Optional - Google AI Studio)
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+
+# Analysis Safety & Resource Limits
+MAX_REPO_SIZE_MB=200.0
+MAX_FILE_COUNT=10000
+SUBPROCESS_TIMEOUT_SECONDS=180
+```
+
+---
+
+## 8. Setup & Local Run
 
 ### Windows (PowerShell)
 
@@ -180,7 +231,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 ---
 
-## 8. Running Tests
+## 9. Running Tests
 
 Run the automated test suite inside the `backend` directory:
 
@@ -188,4 +239,4 @@ Run the automated test suite inside the `backend` directory:
 python -m pytest
 ```
 
-All 49 automated tests verify health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, API endpoints, prompt templates, mock Gemini generation, Markdown report generation formatting, determinism, and download attachment headers.
+All automated tests verify health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, API endpoints, prompt templates, mock Gemini generation, Markdown report generation formatting, determinism, and download attachment headers.
