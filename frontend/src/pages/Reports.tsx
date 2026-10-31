@@ -30,6 +30,7 @@ interface ReportsPageProps {
   findings: Finding[];
   graphNodes?: GraphNode[];
   graphEdges?: GraphEdge[];
+  analysisId?: string;
   onNavigateToFindings?: () => void;
   onNavigateToGraph?: () => void;
 }
@@ -38,7 +39,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   summary,
   findings,
   graphNodes = GRAPH_NODES,
-  graphEdges = GRAPH_EDGES
+  graphEdges = GRAPH_EDGES,
+  analysisId
 }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'preview'>('overview');
   const [downloadSuccess, setDownloadSuccess] = useState<string | null>(null);
@@ -127,7 +129,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     recordDownload('CSV', `${(csvStr.length / 1024).toFixed(1)} KB`);
   };
 
-  const handleExportMarkdown = () => {
+  const handleExportMarkdown = async () => {
+    if (analysisId) {
+      const downloaded = await api.downloadServerReport(analysisId);
+      if (downloaded) {
+        recordDownload('Markdown', 'Audit Report');
+        return;
+      }
+    }
     const mdStr = api.generateMarkdownReport(summary, findings, customization);
     api.downloadFile(mdStr, `CodeImpact-Report-${Date.now()}.md`, 'text/markdown;charset=utf-8;');
     recordDownload('Markdown', `${(mdStr.length / 1024).toFixed(1)} KB`);

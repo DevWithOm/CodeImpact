@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
-    frontend_origin: str = "http://localhost:5173"
+    frontend_origin: str = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
 
     # Gemini AI configuration
     gemini_api_key: str | None = None

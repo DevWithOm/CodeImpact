@@ -31,8 +31,10 @@ export default function App() {
   const [findings, setFindings] = useState<Finding[]>(INITIAL_FINDINGS);
   const [activeFinding, setActiveFinding] = useState<Finding | null>(INITIAL_FINDINGS[0]);
 
-  const [graphNodes] = useState<GraphNode[]>(GRAPH_NODES);
-  const [graphEdges] = useState(GRAPH_EDGES);
+  const [analysisId, setAnalysisId] = useState<string>('');
+  const [graphNodes, setGraphNodes] = useState<GraphNode[]>(GRAPH_NODES);
+  const [graphEdges, setGraphEdges] = useState(GRAPH_EDGES);
+  const [graphCycles, setGraphCycles] = useState(GRAPH_CYCLES);
   const [selectedGraphNode, setSelectedGraphNode] = useState<GraphNode | null>(GRAPH_NODES[1]);
 
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(INITIAL_LOGS);
@@ -53,7 +55,7 @@ export default function App() {
     const url = customUrl || repoUrl;
     setIsScanning(true);
     setScanProgress(5);
-    setScanStatus('Initializing Git Repository Tree Retrieval...');
+    setScanStatus('Submitting analysis request to backend...');
 
     const logMsg = (text: string, type: 'info' | 'warn' | 'error' | 'success' = 'info') => {
       setTerminalLogs((prev) => [
@@ -62,57 +64,78 @@ export default function App() {
       ]);
     };
 
-    logMsg(`[FETCH] Cloning repository head from ${url}...`, 'info');
+    logMsg(`[INIT] Dispatching repository analysis request for ${url} (branch: ${branch})...`, 'info');
 
-    // Notify backend if available
-    await api.startAnalysis(url, branch);
+    try {
+      const { analysisId: newId, status: initStatus } = await api.startAnalysis(url, branch);
+      setAnalysisId(newId);
+      logMsg(`[QUEUE] Analysis created: ${newId} (status: ${initStatus})`, 'success');
 
-    const steps = [
-      {
-        p: 25,
-        status: 'Parsing AST and running Knip export detection...',
-        log: '[KNIP] Checked 412 export points. 14 unreferenced exports flagged.',
-        type: 'warn' as const
-      },
-      {
-        p: 50,
-        status: 'Running jscpd AST clone detection engine...',
-        log: '[JSCPD] Detected 6 structural clone blocks (>85% match).',
-        type: 'warn' as const
-      },
-      {
-        p: 75,
-        status: 'Building Madge dependency cycle matrix...',
-        log: '[MADGE] Found 1 CRITICAL circular dependency cycle in Auth/User modules!',
-        type: 'error' as const
-      },
-      {
-        p: 90,
-        status: 'Synthesizing AI context & risk confidence weights...',
-        log: '[AI] Generated verification checklist & dynamic blind spot warnings.',
-        type: 'success' as const
-      },
-      {
-        p: 100,
-        status: 'Scan complete! Intelligence workspace updated.',
-        log: '[COMPLETE] CodeImpact report ready.',
-        type: 'success' as const
-      }
-    ];
+      let attempts = 0;
+      const maxAttempts = 90;
+      const interval = setInterval(async () => {
+        attempts++;
+        try {
+          const statusData = await api.getAnalysisStatus(newId);
+          const currentStatus = statusData.status || 'running';
+          const stage = (statusData.currentStage || 'analyzing').replace('_', ' ');
+          const pct = Math.min(95, statusData.stageProgress || 10 + attempts * 8);
 
-    steps.forEach((st, idx) => {
-      setTimeout(() => {
-        setScanProgress(st.p);
-        setScanStatus(st.status);
-        logMsg(st.log, st.type);
-        if (st.p === 100) {
-          setTimeout(() => {
+          setScanProgress(pct);
+          setScanStatus(`Stage: ${stage.toUpperCase()} (${pct}%)`);
+
+          if (currentStatus === 'completed' || currentStatus === 'partial') {
+            clearInterval(interval);
+            logMsg(`[SUCCESS] Backend analysis completed (status: ${currentStatus.toUpperCase()})`, 'success');
+
+            const [realFindings, realGraph, latestSummary] = await Promise.all([
+              api.getFindings(newId),
+              api.getDependencyGraph(newId),
+              api.getAnalysisStatus(newId)
+            ]);
+
+            setFindings(realFindings);
+            if (realFindings.length > 0) {
+              setActiveFinding(realFindings[0]);
+              logMsg(`[FINDINGS] Loaded ${realFindings.length} evidence-backed finding(s).`, 'info');
+            } else {
+              logMsg('[FINDINGS] No dead code or duplication clones flagged by analyzers.', 'info');
+            }
+
+            if (realGraph.nodes.length > 0) {
+              setGraphNodes(realGraph.nodes);
+              setGraphEdges(realGraph.edges);
+              setGraphCycles(realGraph.cycles || []);
+              logMsg(`[GRAPH] Rendered dependency topology (${realGraph.nodes.length} nodes, ${realGraph.edges.length} edges).`, 'info');
+            }
+
+            setSummary({
+              ...latestSummary,
+              repoUrl: url,
+              branch
+            });
+
+            setScanProgress(100);
+            setScanStatus('Analysis complete! Intelligence workspace updated.');
+            setTimeout(() => setIsScanning(false), 500);
+          } else if (currentStatus === 'failed') {
+            clearInterval(interval);
+            logMsg(`[ERROR] Analysis failed: ${statusData.error || 'Pipeline execution failed.'}`, 'error');
+            setScanStatus('Analysis failed. Please inspect terminal logs.');
             setIsScanning(false);
-            setSummary((prev) => ({ ...prev, repoUrl: url, branch }));
-          }, 500);
+          } else if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            logMsg('[TIMEOUT] Analysis polling timed out.', 'warn');
+            setIsScanning(false);
+          }
+        } catch (err) {
+          console.warn('[Polling Error]', err);
         }
-      }, (idx + 1) * 700);
-    });
+      }, 1500);
+    } catch (err: any) {
+      logMsg(`[ERROR] Failed to start analysis: ${err?.message || err}`, 'error');
+      setIsScanning(false);
+    }
   };
 
   // AI Chat Handler
@@ -129,7 +152,7 @@ export default function App() {
 
     try {
       const currentFinding = activeFinding || findings[0];
-      const { text, source } = await api.explainFinding(currentFinding, promptText);
+      const { text, source } = await api.explainFinding(currentFinding, promptText, analysisId);
 
       setAiChat((prev) => [
         ...prev,
@@ -254,7 +277,7 @@ export default function App() {
           selectedNode={selectedGraphNode}
           setSelectedNode={setSelectedGraphNode}
           onInspectLinkedFindings={handleInspectLinkedFindingsFromNode}
-          cycles={GRAPH_CYCLES}
+          cycles={graphCycles}
         />
       )}
 
@@ -282,6 +305,7 @@ export default function App() {
           findings={findings}
           graphNodes={graphNodes}
           graphEdges={graphEdges}
+          analysisId={analysisId}
           onNavigateToFindings={() => setActiveTab('findings')}
           onNavigateToGraph={() => setActiveTab('graph')}
         />

@@ -1,12 +1,37 @@
-import { Finding, GraphNode, GraphEdge, DependencyCycleInfo, AnalysisSummary, ChatMessage, ReportCustomization } from '../types';
+import { Finding, GraphNode, GraphEdge, DependencyCycleInfo, AnalysisSummary, ChatMessage, ReportCustomization, FindingCategory, FindingSeverity, ImpactRiskType } from '../types';
 import { INITIAL_FINDINGS, GRAPH_NODES, GRAPH_EDGES, GRAPH_CYCLES, DEFAULT_SUMMARY } from './mockData';
 
-const BASE_URL = import.meta.env.VITE_API_URL || '';
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+function mapBackendCategory(cat: string): FindingCategory {
+  const c = (cat || '').toLowerCase();
+  if (c.includes('duplicate')) return 'Duplicate code';
+  if (c.includes('cycle') || c.includes('circular')) return 'Circular dependencies';
+  if (c.includes('unused_file')) return 'Potentially unused files';
+  if (c.includes('hotspot')) return 'High-risk hotspots';
+  return 'Potentially unused code';
+}
+
+function mapSeverity(sev: string): FindingSeverity {
+  const s = (sev || 'medium').toLowerCase();
+  if (s === 'critical') return 'Critical';
+  if (s === 'high') return 'High';
+  if (s === 'low') return 'Low';
+  return 'Medium';
+}
+
+function mapImpactRiskType(r: string): ImpactRiskType {
+  const val = (r || 'medium').toLowerCase();
+  if (val.includes('critical')) return 'critical';
+  if (val.includes('high')) return 'high';
+  if (val.includes('low')) return 'low';
+  return 'medium';
+}
 
 /**
  * Service layer for CodeImpact API interactions.
- * Connects to the backend REST API if available; gracefully falls back to mock intelligence
- * so the frontend is fully functional in standalone mode.
+ * Connects to the backend REST API; gracefully falls back to mock intelligence
+ * if the backend is unreachable.
  */
 export const api = {
   /**
@@ -14,18 +39,20 @@ export const api = {
    */
   async startAnalysis(repoUrl: string, branch = 'main'): Promise<{ analysisId: string; status: string }> {
     try {
-      if (BASE_URL) {
-        const res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repository_url: repoUrl, branch })
-        });
-        if (res.ok) {
-          return await res.json();
-        }
+      const res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository_url: repoUrl, branch })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          analysisId: data.analysis_id || data.analysisId || `an_${Date.now()}`,
+          status: data.status || 'queued'
+        };
       }
-    } catch {
-      // Fallback to client simulation
+    } catch (err) {
+      console.warn('[CodeImpact API] Failed to trigger backend analysis, falling back to local simulation:', err);
     }
 
     return {
@@ -37,16 +64,33 @@ export const api = {
   /**
    * Retrieves status and summary metrics.
    */
-  async getAnalysisStatus(analysisId: string): Promise<AnalysisSummary> {
+  async getAnalysisStatus(analysisId: string): Promise<AnalysisSummary & { status?: string; currentStage?: string; stageProgress?: number; error?: string | null }> {
     try {
-      if (BASE_URL) {
-        const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`);
-        if (res.ok) {
-          return await res.json();
-        }
+      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const m = data.metrics || {};
+        const total = m.total_findings ?? 0;
+        const health = total === 0 ? 'A+' : total < 5 ? 'A-' : total < 10 ? 'B+' : total < 20 ? 'B' : 'C';
+
+        return {
+          repoUrl: data.repository_url || '',
+          branch: data.branch || 'main',
+          analyzedFiles: m.files_analyzed || m.total_files || 10,
+          totalFindings: total,
+          potentiallyUnusedCount: m.potentially_unused ?? 0,
+          duplicationClonesCount: m.duplicate_code ?? 0,
+          circularCyclesCount: m.circular_dependencies ?? 0,
+          hotspotRiskIndex: m.high_risk_findings ? Math.min(100, m.high_risk_findings * 25) : 0,
+          healthScore: health,
+          status: data.status,
+          currentStage: data.current_stage,
+          stageProgress: data.stage_progress,
+          error: data.error
+        };
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn(`[CodeImpact API] Status check failed for ${analysisId}:`, err);
     }
 
     return DEFAULT_SUMMARY;
@@ -55,16 +99,74 @@ export const api = {
   /**
    * Retrieves normalized findings.
    */
-  async getFindings(_analysisId: string): Promise<Finding[]> {
+  async getFindings(analysisId: string): Promise<Finding[]> {
     try {
-      if (BASE_URL) {
-        const res = await fetch(`${BASE_URL}/api/analyses/${_analysisId}/findings`);
-        if (res.ok) {
-          return await res.json();
+      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/findings`);
+      if (res.ok) {
+        const data = await res.json();
+        const rawItems = Array.isArray(data) ? data : data.items || [];
+        if (rawItems.length > 0) {
+          return rawItems.map((item: any, idx: number): Finding => {
+            const id = item.finding_id || item.id || `f_${idx + 1}`;
+            const file = item.file_path || item.file || 'unknown';
+            const cat = mapBackendCategory(item.category);
+            const sev = mapSeverity(item.severity);
+            const risk = item.review_risk || 'Medium';
+            const riskType = mapImpactRiskType(risk);
+            const conf = typeof item.confidence === 'number'
+              ? (item.confidence <= 1.0 ? Math.round(item.confidence * 100) : Math.round(item.confidence))
+              : 85;
+            const lines = item.line_number
+              ? (item.line_end && item.line_end !== item.line_number ? `L${item.line_number}-L${item.line_end}` : `L${item.line_number}`)
+              : 'Entire file';
+
+            const evList = item.evidence || [];
+            const primaryEv = evList[0] || {};
+            const desc = primaryEv.details || primaryEv.message || primaryEv.description || `${cat} candidate identified by ${item.analyzer || 'static analyzer'}.`;
+
+            const imp = item.impact || {};
+            const incoming = imp.direct_dependents_count ?? 0;
+            const outgoing = 0;
+            const affectedMods = imp.direct_dependents || [];
+            const affectedTests = imp.test_suites || [];
+
+            return {
+              id,
+              category: cat,
+              title: item.symbol_name ? `${item.symbol_name} in ${file.split('/').pop()}` : `${cat}: ${file}`,
+              file,
+              lines,
+              severity: sev,
+              confidence: conf,
+              impactScore: imp.impact_score ?? (riskType === 'high' ? 85 : riskType === 'medium' ? 50 : 20),
+              impactRisk: `${risk.charAt(0).toUpperCase() + risk.slice(1)} Risk`,
+              impactRiskType: riskType,
+              analyzer: (item.analyzer || 'Static Analysis').toUpperCase(),
+              description: desc,
+              codeSnippet: primaryEv.snippet || `// Location: ${file} ${lines}\n// Symbol: ${item.symbol_name || 'N/A'}`,
+              dependencyContext: {
+                incoming,
+                outgoing,
+                affectedModules: affectedMods,
+                affectedTests: affectedTests
+              },
+              testImpactContext: {
+                testFiles: affectedTests,
+                whyAffected: imp.why_affected || (affectedTests.length > 0 ? 'Direct imports in test suites.' : 'No direct unit tests mapped.')
+              },
+              verificationSteps: [
+                `Verify if ${item.symbol_name || file} is invoked dynamically or via string reflection.`,
+                'Run automated unit test suites targeting importing caller modules.',
+                'Check Git blame/history to understand original architectural intent before refactoring.'
+              ],
+              reviewStatus: 'Pending Review',
+              runtimeCaveat: 'Static analysis cannot prove dynamic runtime reachability.'
+            };
+          });
         }
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn(`[CodeImpact API] Findings fetch failed for ${analysisId}:`, err);
     }
 
     return INITIAL_FINDINGS;
@@ -73,16 +175,64 @@ export const api = {
   /**
    * Retrieves dependency graph nodes, edges, and cycle chains.
    */
-  async getDependencyGraph(_analysisId: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; cycles?: DependencyCycleInfo[] }> {
+  async getDependencyGraph(analysisId: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; cycles?: DependencyCycleInfo[] }> {
     try {
-      if (BASE_URL) {
-        const res = await fetch(`${BASE_URL}/api/analyses/${_analysisId}/graph`);
-        if (res.ok) {
-          return await res.json();
+      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/graph`);
+      if (res.ok) {
+        const data = await res.json();
+        const rawNodes = data.nodes || [];
+        const rawEdges = data.edges || [];
+        const rawCycles = data.cycles || [];
+
+        if (rawNodes.length > 0) {
+          const nodes: GraphNode[] = rawNodes.map((n: any, idx: number) => {
+            const id = n.id || n.path;
+            const hasCycles = Boolean(n.has_cycles);
+            const isEntry = Boolean(n.is_entry_point);
+            const inDeg = n.in_degree ?? n.dependents_count ?? 0;
+            const outDeg = n.out_degree ?? n.dependencies_count ?? 0;
+
+            return {
+              id,
+              label: n.label || id.split('/').pop() || id,
+              filePath: n.path || id,
+              type: hasCycles ? 'cycle' : isEntry ? 'entry' : 'standard',
+              risk: (n.risk_level || 'low').toLowerCase() as any,
+              x: 120 + (idx % 4) * 240,
+              y: 80 + Math.floor(idx / 4) * 160,
+              val: inDeg + 1,
+              incomingCount: inDeg,
+              outgoingCount: outDeg,
+              affectedModules: [],
+              affectedTests: []
+            };
+          });
+
+          const edges: GraphEdge[] = rawEdges.map((e: any, idx: number) => ({
+            id: `e_${e.source}_${e.target}_${idx}`,
+            from: e.source,
+            to: e.target,
+            source: e.source,
+            target: e.target,
+            isCycle: Boolean(e.is_cycle)
+          }));
+
+          const cycles: DependencyCycleInfo[] = rawCycles.map((c: any, idx: number) => {
+            const arr = Array.isArray(c) ? c : c.nodes || [];
+            return {
+              id: `cycle-${idx + 1}`,
+              name: arr.map((f: string) => f.split('/').pop()).join(' ⇄ ') || `Cycle ${idx + 1}`,
+              nodeIds: arr,
+              description: 'Circular import dependency chain identified by Madge AST analysis.',
+              severity: 'High'
+            };
+          });
+
+          return { nodes, edges, cycles };
         }
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn(`[CodeImpact API] Graph fetch failed for ${analysisId}:`, err);
     }
 
     return {
@@ -90,6 +240,37 @@ export const api = {
       edges: GRAPH_EDGES,
       cycles: GRAPH_CYCLES
     };
+  },
+
+  /**
+   * Downloads server-generated Markdown audit report (Phase 5 endpoint).
+   */
+  async downloadServerReport(analysisId: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/report`);
+      if (res.ok) {
+        const blob = await res.blob();
+        let filename = `CodeImpact_Report_${analysisId}.md`;
+        const disp = res.headers.get('content-disposition');
+        if (disp && disp.includes('filename=')) {
+          const match = disp.match(/filename="?([^"]+)"?/);
+          if (match && match[1]) filename = match[1];
+        }
+
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        return true;
+      }
+    } catch (err) {
+      console.warn('[CodeImpact API] Download server report failed:', err);
+    }
+    return false;
   },
 
   /**
@@ -104,56 +285,37 @@ export const api = {
   ): Promise<{ text: string; source: 'backend-gemini' | 'grounded-engine' }> {
     const q = (customPrompt || '').toLowerCase().trim();
 
-    // 1. Attempt Backend API if BASE_URL configured
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/explain`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            finding_id: finding.id,
-            prompt: customPrompt,
-            finding_details: {
-              file: finding.file,
-              category: finding.category,
-              confidence: finding.confidence,
-              analyzer: finding.analyzer,
-              impact_risk: finding.impactRisk,
-              dependency_context: finding.dependencyContext,
-              test_impact_context: finding.testImpactContext,
-              code_snippet: finding.codeSnippet,
-              verification_steps: finding.verificationSteps
-            }
-          })
-        });
+    // 1. Attempt Backend API if available
+    try {
+      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          finding_id: finding.id,
+          prompt: customPrompt
+        })
+      });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.explanation) {
-            return { text: data.explanation, source: 'backend-gemini' };
-          }
-          if (data.summary) {
-            const formatted = `### AI Assessment: ${finding.title}
+      if (res.ok) {
+        const data = await res.json();
+        if (data.explanation) {
+          const formatted = `### AI Assessment: ${finding.title}
 
-${data.summary}
+${data.explanation}
 
-**Why It Matters:**
-${data.why_it_matters || 'No specific impact stated.'}
+**Potential Cleanup Risks:**
+${(data.potential_risks || []).map((r: string) => `- ${r}`).join('\n') || '- None documented.'}
 
-**Potential False Positive Scenarios:**
-${(data.false_positive_scenarios || []).map((s: string) => `- ${s}`).join('\n') || '- None documented.'}
-
-**Verification Checklist:**
-${(data.verification_steps || []).map((v: string, i: number) => `${i + 1}. ${v}`).join('\n')}
+**Verification Steps:**
+${(data.verification_steps || []).map((v: string, i: number) => `${i + 1}. ${v}`).join('\n') || '1. Run test suite.\n2. Check call sites.'}
 
 > [!CAUTION]
-> **Limitations**: ${data.limitations?.join(' ') || 'Static analysis cannot prove dynamic runtime reachability.'}`;
-            return { text: formatted, source: 'backend-gemini' };
-          }
+> **Limitations**: ${(data.uncertainty_notes || []).join(' ') || 'Static analysis cannot prove dynamic runtime reachability.'}`;
+          return { text: formatted, source: 'backend-gemini' };
         }
-      } catch {
-        // Fall back gracefully to grounded client-side analysis
       }
+    } catch {
+      // Fall back gracefully to grounded client-side engine
     }
 
     // 2. Grounded Client-Side Engine Fallback (Deterministic, Evidence-First)

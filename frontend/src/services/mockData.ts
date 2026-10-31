@@ -1,6 +1,7 @@
 import { DemoRepo, Finding, GraphNode, GraphEdge, DependencyCycleInfo, CompetitorRow, TerminalLog, AnalysisSummary } from '../types';
 
 export const DEMO_REPOS: DemoRepo[] = [
+  { name: 'DevWithOm/DeadCode-Detective', label: 'CodeImpact Core', branch: 'main', stars: 'Hacktoberfest', health: '92%', description: 'Hacktoberfest project with Knip, jscpd, and Madge analysis fixtures' },
   { name: 'facebook/react', label: 'React Core', branch: 'main', stars: '220k', health: '89%', description: 'UI library for web and native interfaces' },
   { name: 'tailwindlabs/tailwindcss', label: 'Tailwind CSS', branch: 'main', stars: '81k', health: '94%', description: 'Utility-first CSS framework' },
   { name: 'vercel/next.js', label: 'Next.js Framework', branch: 'canary', stars: '121k', health: '86%', description: 'The React Framework for the Web' },
