@@ -44,3 +44,4 @@ __all__ = [
     "run_jscpd_analysis",
     "get_jscpd_version",
 ]
+
