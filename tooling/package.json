@@ -1,0 +1,15 @@
+{
+  "name": "codeimpact-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Trusted CLI tools for CodeImpact static analysis",
+  "scripts": {
+    "knip": "knip",
+    "jscpd": "jscpd"
+  },
+  "dependencies": {
+    "knip": "5.45.0",
+    "jscpd": "4.0.5",
+    "typescript": "5.7.3"
+  }
+}
