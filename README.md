@@ -87,10 +87,11 @@ cp .env.example .env
 cd ..
 ```
 
-### Step 4: Setup Frontend (When Available)
+### Step 4: Setup Frontend Dashboard
 ```bash
 cd frontend
 npm install
+cp .env.example .env
 cd ..
 ```
 
@@ -101,71 +102,60 @@ cd ..
 ### Start Backend API Server
 From repository root:
 ```bash
-# With venv activated
-uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port 8000 --reload
+# Windows PowerShell
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
+
+# Linux/macOS
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
 ```
-API Documentation will be accessible at: `http://localhost:8000/docs`
+- Interactive Swagger Documentation: `http://localhost:8000/docs`
+- Health Probe: `http://localhost:8000/health`
 
 ### Start Frontend Dev Server
-From repository root:
+From repository root in a separate terminal:
 ```bash
 cd frontend
 npm run dev
 ```
-Frontend will be accessible at: `http://localhost:5173`
+- Frontend UI Dashboard: `http://localhost:3000`
 
 ---
 
-## 6. API Usage Example
+## 6. API Endpoints
 
-### Start an Analysis
-```bash
-curl -X POST "http://localhost:8000/api/repositories/analyse" \
-     -H "Content-Type: application/json" \
-     -d '{"repository_url": "https://github.com/facebook/react", "branch": "main"}'
-```
-Response (`202 Accepted`):
-```json
-{
-  "analysis_id": "an_a1b2c3d4e5f6",
-  "status": "queued",
-  "repository": "facebook/react",
-  "branch": "main"
-}
-```
-
-### Poll Analysis Status & Metrics
-```bash
-curl "http://localhost:8000/api/analyses/an_a1b2c3d4e5f6"
-```
-
-### Retrieve Normalized Findings
-```bash
-curl "http://localhost:8000/api/analyses/an_a1b2c3d4e5f6/findings?category=duplicate_code"
-```
-
-### Request Grounded AI Explanation
-```bash
-curl -X POST "http://localhost:8000/api/analyses/an_a1b2c3d4e5f6/explain" \
-     -H "Content-Type: application/json" \
-     -d '{"finding_id": "f_dup_001"}'
-```
+| Method | Endpoint | Description | Status Code |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/health` | Liveness and health check | `200 OK` |
+| `POST` | `/api/repositories/analyse` | Submit repository for background analysis | `202 Accepted` |
+| `GET` | `/api/analyses/{id}` | Poll analysis lifecycle status & summary metrics | `200 OK` |
+| `GET` | `/api/analyses/{id}/findings` | Retrieve paginated, filterable normalized findings | `200 OK` |
+| `GET` | `/api/analyses/{id}/findings/{finding_id}` | Detailed finding evidence and mapped test suites | `200 OK` |
+| `GET` | `/api/analyses/{id}/graph` | Directed dependency graph, hub nodes, and cycles | `200 OK` |
+| `POST` | `/api/analyses/{id}/explain` | Grounded Gemini AI explanation & verification steps | `200 OK` |
+| `GET` | `/api/analyses/{id}/report` | Downloadable Markdown audit report (RFC attachment) | `200 OK` |
 
 ---
 
 ## 7. Testing Instructions
 
-### Run Static Analysis & Security Test Suite
-From the repository root:
+Run the complete automated test suite across all four teammate modules (296 tests):
 ```bash
+# Run from repository root
 python -m pytest backend/tests/ -v
+
+# Or run from backend directory
+cd backend
+python -m pytest -v
 ```
 
-Test suites include:
-- `test_repository.py`: Workspace lifecycle, URL validation, size caps, and branch sanitization.
-- `test_knip.py`: Knip 5.45.0 execution, version detection, unused file/export/dependency detection.
-- `test_jscpd.py`: jscpd 4.0.5 execution, clone detection, multi-location duplicate grouping.
-- `test_security.py`: Secret redaction, output truncation, symlink rejection, and untrusted config protection.
+Test coverage includes:
+- `test_e2e_integration.py`: End-to-end pipeline execution from retrieval to Markdown download.
+- `test_report_generator.py` & `test_report_endpoint.py`: Deterministic Markdown audit report compilation and RFC headers.
+- `test_ai_service.py`, `test_ai_prompt.py`, `test_ai_endpoint.py`: Grounded Gemini AI explanations and fallback engine.
+- `test_graph_builder.py`, `test_cycle_detector.py`, `test_madge.py`: Madge dependency graph traversal and circular cycle detection.
+- `test_risk_scorer.py`, `test_test_impact_analyzer.py`: Review-risk weighting and test candidate mapping.
+- `test_knip.py`, `test_jscpd.py`: Knip unused code scanner and jscpd structural duplication clone grouping.
+- `test_repository.py`, `test_security.py`: Safe isolated workspace containment and secret redaction.
 
 ---
 

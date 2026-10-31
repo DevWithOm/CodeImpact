@@ -1,9 +1,29 @@
-"""Integration test for OM_2 static analysis service interface."""
+"""API and static analysis integration tests."""
 
 from pathlib import Path
 import pytest
+from fastapi.testclient import TestClient
+
+try:
+    from backend.app.main import app
+except ImportError:
+    from app.main import app
 
 from backend.app.services.static_analysis.analyzer import analyze_repository
+
+client = TestClient(app)
+
+
+def test_api_root_health():
+    res = client.get("/health")
+    assert res.status_code == 200
+    assert res.json() == {"status": "ok"}
+
+
+def test_api_repositories_analyse_endpoint():
+    res = client.post("/api/repositories/analyse", json={"repository_url": "https://github.com/owner/repo"})
+    assert res.status_code == 202
+    assert res.json()["status"] == "queued"
 
 
 def test_analyze_repository_fixture():
