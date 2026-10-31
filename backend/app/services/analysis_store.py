@@ -267,6 +267,13 @@ class AnalysisStore:
                 )
             return deepcopy(record.graph)
 
+    def get_record(self, analysis_id: str) -> AnalysisRecord | None:
+        with self._lock:
+            record = self._records.get(analysis_id)
+            if record is None:
+                return None
+            return deepcopy(record)
+
     def clear(self) -> None:
         """Clear all records (intended for testing)."""
         with self._lock:

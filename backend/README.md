@@ -29,7 +29,7 @@ backend/
 │   │   └── config.py        # Pydantic Settings application configuration
 │   ├── api/
 │   │   ├── repositories.py  # POST /api/repositories/analyse
-│   │   ├── analyses.py      # GET status, findings, detail, graph, POST explain
+│   │   ├── analyses.py      # GET status, findings, detail, graph, POST explain, GET report
 │   │   ├── ai.py            # AI route reference
 │   │   └── reports.py       # Markdown report download routes (Phase 5)
 │   ├── schemas/
@@ -47,6 +47,8 @@ backend/
 │   ├── services/
 │   │   ├── analysis_store.py # Thread-safe in-memory job & findings store
 │   │   ├── orchestrator.py  # Background pipeline coordinator
+│   │   ├── reports/         # Deterministic Markdown report generator (Phase 5)
+│   │   │   └── report_generator.py # Assembly, formatting, and RFC attachment naming
 │   │   └── ai/              # Gemini AI service and prompt templates
 │   │       ├── gemini_service.py   # Google GenAI client and generation logic
 │   │       └── prompt_templates.py # Grounded prompt builder & deterministic fallback
@@ -62,7 +64,9 @@ backend/
     ├── test_analyses_api.py     # Analyses, findings, and graph API tests
     ├── test_ai_prompt.py        # Grounded prompt building and fallback tests
     ├── test_ai_service.py       # Gemini client mocking, parsing, and errors
-    └── test_ai_endpoint.py      # POST /explain endpoint integration tests
+    ├── test_ai_endpoint.py      # POST /explain endpoint integration tests
+    ├── test_report_generator.py # Markdown report generator formatting & determinism tests
+    └── test_report_endpoint.py  # GET /api/analyses/{id}/report download endpoint tests
 ```
 
 ---
@@ -101,7 +105,27 @@ backend/
 
 ---
 
-## 5. Endpoints Available in Phase 4
+## 5. Markdown Audit Report Generation (Phase 5)
+
+- **Endpoint:** `GET /api/analyses/{analysis_id}/report`
+- **Response Format:** Downloadable Markdown (`text/markdown; charset=utf-8`) with `Content-Disposition: attachment; filename="CodeImpact_Report_{repo}_{analysis_id}.md"`.
+- **Report Architecture:**
+  - Strictly deterministic compilation: given identical stored analysis data and timestamp, it outputs byte-for-byte identical markdown.
+  - Zero external calls: does not call Gemini, does not re-run analyzers, does not clone repositories.
+  - Evidence-grounded: never claims code is safe to delete, clearly flags dynamic import caveats, and compiles pre-cleanup verification checklists.
+  - Gracefully handles missing/partial tools, cycles, and AI explanation caches.
+- **Report Structure:**
+  1. Title & Header (Repository, branch, commit, analysis ID, generation timestamp)
+  2. Executive Summary (Status, tool coverage, high-risk items, partial completion notes)
+  3. Analysis Metadata (Start/end timestamps, duration, files analyzed, tool breakdown, errors)
+  4. Findings Metrics Table (Categorized by type, review risk, severity, confidence, and source analyzer)
+  5. Detailed Findings & Evidence (Sorted by risk level `high -> medium -> low`, with line numbers, symbols, tool evidence, and cached AI explanations)
+  6. Dependency Graph & Structural Impact (Total nodes/edges, high-impact hub files, detected circular dependency chains)
+  7. Pre-Cleanup Verification Checklist & Analysis Limitations (Unit test verification, dynamic dispatch warnings, and non-destructive refactoring tips)
+
+---
+
+## 6. Endpoints Available
 
 | Method | Endpoint | Description | Status Code |
 | :--- | :--- | :--- | :--- |
@@ -112,12 +136,13 @@ backend/
 | `GET` | `/api/analyses/{analysis_id}/findings/{finding_id}` | Detailed finding evidence & test candidates | `200 OK` (or `404`) |
 | `GET` | `/api/analyses/{analysis_id}/graph` | Directed dependency graph & detected cycles | `200 OK` (or `404`) |
 | `POST` | `/api/analyses/{analysis_id}/explain` | Grounded AI explanation & recommendations | `200 OK` (or `404`, `503`) |
+| `GET` | `/api/analyses/{analysis_id}/report` | Downloadable Markdown audit report | `200 OK` (or `404`) |
 
 Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
 ---
 
-## 6. Setup & Local Run
+## 7. Setup & Local Run
 
 ### Windows (PowerShell)
 
@@ -155,7 +180,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 ---
 
-## 7. Running Tests
+## 8. Running Tests
 
 Run the automated test suite inside the `backend` directory:
 
@@ -163,4 +188,4 @@ Run the automated test suite inside the `backend` directory:
 python -m pytest
 ```
 
-All 44 automated tests verify health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, API endpoints, prompt templates, mock Gemini generation, and error handling.
+All 49 automated tests verify health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, API endpoints, prompt templates, mock Gemini generation, Markdown report generation formatting, determinism, and download attachment headers.

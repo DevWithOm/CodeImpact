@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.schemas.ai import ExplainRequest, ExplainResponse
 from app.schemas.analysis import AnalysisStatusResponse
@@ -6,6 +6,7 @@ from app.schemas.finding import FindingDetail, FindingsListResponse
 from app.schemas.graph import GraphResponse
 from app.services.ai import AIServiceUnavailableError, gemini_service
 from app.services.analysis_store import analysis_store
+from app.services.reports import generate_markdown_report
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -151,3 +152,38 @@ async def explain_finding(analysis_id: str, request: ExplainRequest) -> ExplainR
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),
         ) from exc
+
+
+@router.get(
+    "/{analysis_id}/report",
+    status_code=status.HTTP_200_OK,
+    summary="Download Markdown audit report",
+    description="Generates and returns a downloadable Markdown audit report for the analysis.",
+    responses={
+        200: {
+            "content": {"text/markdown": {}},
+            "description": "Downloadable Markdown audit report.",
+        }
+    },
+)
+async def download_analysis_report(analysis_id: str) -> Response:
+    record = analysis_store.get_record(analysis_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Analysis '{analysis_id}' was not found.",
+        )
+
+    markdown_content = generate_markdown_report(record)
+    safe_repo = record.repository.replace("/", "_").replace("\\", "_").replace(" ", "_")
+    filename = f"CodeImpact_Report_{safe_repo}_{analysis_id}.md"
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Content-Type": "text/markdown; charset=utf-8",
+    }
+    return Response(
+        content=markdown_content,
+        media_type="text/markdown",
+        headers=headers,
+    )
