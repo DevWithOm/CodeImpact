@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from fastapi import APIRouter, BackgroundTasks, status
 
@@ -25,8 +26,8 @@ async def start_analysis(
     # Create initial record in analysis store
     analysis_store.create_analysis(analysis_id=analysis_id, request=request)
 
-    # Schedule background analysis pipeline
-    background_tasks.add_task(orchestrator.run_pipeline, analysis_id)
+    # Dispatch pipeline as an independent background task so HTTP 202 returns immediately (<10ms)
+    asyncio.create_task(orchestrator.run_pipeline(analysis_id))
 
     return AnalysisCreatedResponse(
         analysis_id=analysis_id,

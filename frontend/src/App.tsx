@@ -99,9 +99,10 @@ export default function App() {
           const currentStatus = statusData.status || 'running';
           const stage = (statusData.currentStage || 'analyzing').replace('_', ' ');
           const pct = Math.min(95, statusData.stageProgress || 10 + attempts * 8);
+          const stageMsg = statusData.message ? `${statusData.message} (${pct}%)` : `Stage: ${stage.toUpperCase()} (${pct}%)`;
 
           setScanProgress(pct);
-          setScanStatus(`Stage: ${stage.toUpperCase()} (${pct}%)`);
+          setScanStatus(stageMsg);
 
           if (currentStatus === 'completed' || currentStatus === 'partial') {
             if (pollingIntervalRef.current) {
@@ -175,8 +176,9 @@ export default function App() {
 
       pollingIntervalRef.current = interval;
     } catch (err: any) {
-      logMsg(`[ERROR] Failed to start analysis: ${err?.message || err}`, 'error');
-      setScanStatus(`Failed to start: ${err?.message || err}`);
+      const msg = err?.message || 'Unable to connect to the CodeImpact backend. Please check whether the backend server is running.';
+      logMsg(`[ERROR] ${msg}`, 'error');
+      setScanStatus(msg);
       setIsScanning(false);
     }
   };

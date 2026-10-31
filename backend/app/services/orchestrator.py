@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 import uuid
@@ -293,8 +294,10 @@ class AnalysisOrchestrator:
 
         try:
             # Stage 1: Repository Retrieval & Workspace Setup
+            self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="cloning")
             try:
-                retrieval_res = self.repo_adapter.retrieve_repository(
+                retrieval_res = await asyncio.to_thread(
+                    self.repo_adapter.retrieve_repository,
                     repository_url=repo_url,
                     branch=branch,
                     analysis_id=analysis_id,
@@ -318,7 +321,11 @@ class AnalysisOrchestrator:
             self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="static_analysis")
             raw_findings = []
             try:
-                static_res = self.static_adapter.analyze_repository(workspace_path, analysis_id)
+                static_res = await asyncio.to_thread(
+                    self.static_adapter.analyze_repository,
+                    workspace_path,
+                    analysis_id,
+                )
                 raw_findings = static_res.get("findings", [])
                 tool_coverage.update(static_res.get("tool_coverage", {}))
             except Exception as exc:
@@ -329,7 +336,12 @@ class AnalysisOrchestrator:
             self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="dependency_analysis")
             raw_graph = {}
             try:
-                impact_res = self.dependency_adapter.analyze_impact(workspace_path, raw_findings, analysis_id)
+                impact_res = await asyncio.to_thread(
+                    self.dependency_adapter.analyze_impact,
+                    workspace_path,
+                    raw_findings,
+                    analysis_id,
+                )
                 raw_graph = impact_res.get("graph", {})
                 raw_findings = impact_res.get("enriched_findings", raw_findings)
                 tool_coverage.update(impact_res.get("tool_coverage", {"dependency_impact": "success"}))
@@ -337,7 +349,8 @@ class AnalysisOrchestrator:
                 logger.warning("Dependency impact analysis failed for %s: %s", analysis_id, exc)
                 tool_coverage["dependency_impact"] = "failed"
 
-            # Convert outputs to validated schemas
+            # Stage 4: Risk Scoring & Result Assembly
+            self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="result_assembly")
             findings = [normalize_finding_dict(f) for f in raw_findings]
             graph = normalize_graph_dict(analysis_id, raw_graph)
 
@@ -374,7 +387,7 @@ class AnalysisOrchestrator:
             )
         finally:
             if workspace_path:
-                self.repo_adapter.cleanup_workspace(workspace_path)
+                await asyncio.to_thread(self.repo_adapter.cleanup_workspace, workspace_path)
 
 
 # Default orchestrator singleton

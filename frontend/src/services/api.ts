@@ -45,11 +45,25 @@ export const api = {
       normalizedUrl = `https://github.com/${normalizedUrl}`;
     }
 
-    const res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ repository_url: normalizedUrl, branch })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}/api/repositories/analyse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repository_url: normalizedUrl, branch }),
+        signal: controller.signal
+      });
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        throw new Error('Analysis request timed out after 10 seconds.');
+      }
+      throw new Error('Unable to connect to the CodeImpact backend. Please check whether the backend server is running.');
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (res.ok) {
       const data = await res.json();
@@ -67,8 +81,23 @@ export const api = {
   /**
    * Retrieves status and summary metrics.
    */
-  async getAnalysisStatus(analysisId: string): Promise<AnalysisSummary & { status?: string; currentStage?: string; stageProgress?: number; error?: string | null }> {
-    const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`);
+  async getAnalysisStatus(analysisId: string): Promise<AnalysisSummary & { status?: string; currentStage?: string; stageProgress?: number; error?: string | null; message?: string | null }> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE_URL}/api/analyses/${analysisId}`, { signal: controller.signal });
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error('Backend status check timed out.');
+      }
+      throw new Error('Unable to connect to the CodeImpact backend.');
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
     if (res.ok) {
       const data = await res.json();
       const m = data.metrics || {};
@@ -90,7 +119,8 @@ export const api = {
         healthScore: health,
         status: data.status,
         currentStage: data.current_stage,
-        stageProgress: data.stage_progress,
+        stageProgress: data.progress ?? data.stage_progress ?? (data.status === 'completed' ? 100 : 10),
+        message: data.message || null,
         error: data.error || data.error_message || null
       };
     }

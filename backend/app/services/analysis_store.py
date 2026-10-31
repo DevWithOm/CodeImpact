@@ -63,6 +63,8 @@ class AnalysisRecord:
     branch: str
     status: AnalysisStatus
     current_stage: str | None = None
+    progress: int = 5
+    message: str | None = "Request accepted and queued"
     commit_sha: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: datetime | None = None
@@ -82,12 +84,28 @@ class AnalysisRecord:
             commit_sha=self.commit_sha,
             status=self.status,
             current_stage=self.current_stage,
+            progress=self.progress,
+            stage_progress=self.progress,
+            message=self.message,
             created_at=self.created_at,
             completed_at=self.completed_at,
             metrics=self.metrics,
             tool_coverage=self.tool_coverage,
             error_message=self.error_message,
         )
+
+
+STAGE_PROGRESS_MAP: dict[str, tuple[int, str]] = {
+    "queued": (5, "Request accepted and queued"),
+    "cloning": (15, "Retrieving repository via shallow clone"),
+    "static_analysis": (30, "Running Knip and jscpd static analysis"),
+    "dependency_analysis": (55, "Analyzing dependencies, topology, and impact"),
+    "risk_scoring": (85, "Calculating review risk and explanations"),
+    "result_assembly": (95, "Assembling unified analysis results"),
+    "completed": (100, "Analysis completed successfully"),
+    "partial": (100, "Analysis completed with partial tool coverage"),
+    "failed": (0, "Analysis pipeline failed"),
+}
 
 
 class AnalysisStore:
@@ -133,6 +151,8 @@ class AnalysisStore:
         status: AnalysisStatus,
         stage: str | None = None,
         error_message: str | None = None,
+        progress: int | None = None,
+        message: str | None = None,
     ) -> AnalysisStatusResponse | None:
         with self._lock:
             record = self._records.get(analysis_id)
@@ -142,15 +162,27 @@ class AnalysisStore:
             record.status = status
             if stage is not None:
                 record.current_stage = stage
+                if stage in STAGE_PROGRESS_MAP:
+                    default_prog, default_msg = STAGE_PROGRESS_MAP[stage]
+                    record.progress = progress if progress is not None else default_prog
+                    record.message = message or default_msg
+            elif progress is not None:
+                record.progress = progress
+            if message is not None:
+                record.message = message
 
             if status == AnalysisStatus.RUNNING and record.started_at is None:
                 record.started_at = datetime.now(timezone.utc)
 
             if status in (AnalysisStatus.COMPLETED, AnalysisStatus.PARTIAL, AnalysisStatus.FAILED):
                 record.completed_at = datetime.now(timezone.utc)
+                if status in (AnalysisStatus.COMPLETED, AnalysisStatus.PARTIAL):
+                    record.progress = 100
+                    record.message = "Analysis completed successfully"
 
             if error_message is not None:
                 record.error_message = error_message
+                record.message = error_message
 
             return record.to_status_response()
 
@@ -178,6 +210,8 @@ class AnalysisStore:
             record.metrics = compute_metrics(findings, graph)
             record.status = status
             record.current_stage = status.value
+            record.progress = 100
+            record.message = "Analysis completed successfully" if status == AnalysisStatus.COMPLETED else "Analysis completed with partial coverage"
             record.completed_at = datetime.now(timezone.utc)
             if error_message:
                 record.error_message = error_message

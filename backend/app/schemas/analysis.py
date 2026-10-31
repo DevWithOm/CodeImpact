@@ -153,6 +153,9 @@ class AnalysisStatusResponse(BaseModel):
     commit_sha: str | None = None
     status: AnalysisStatus
     current_stage: str | None = None
+    progress: int = Field(default=0, ge=0, le=100, description="Pipeline completion percentage (0-100)")
+    stage_progress: int = Field(default=0, ge=0, le=100, description="Pipeline completion percentage (0-100)")
+    message: str | None = Field(default=None, description="Current progress or diagnostic status message")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
     metrics: AnalysisMetrics = Field(default_factory=AnalysisMetrics)
