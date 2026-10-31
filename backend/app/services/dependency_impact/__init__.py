@@ -1,0 +1,57 @@
+"""SAMAR_3: Dependency & Impact Engine package.
+
+Exposes Madge dependency extraction runner, graph builder, impact analyzer,
+test mapper, and review risk engine.
+"""
+
+from backend.app.services.dependency_impact.madge_runner import (
+    ERR_MADGE_EXECUTION_FAILED,
+    ERR_MADGE_INVALID_JSON,
+    ERR_MADGE_NOT_FOUND,
+    ERR_MADGE_OUTPUT_LIMIT_EXCEEDED,
+    ERR_MADGE_PARTIAL_OUTPUT,
+    ERR_MADGE_TIMEOUT,
+    ERR_REPOSITORY_NOT_FOUND,
+    ERR_REPOSITORY_PATH_INVALID,
+    STATUS_FAILED,
+    STATUS_PARTIAL,
+    STATUS_SUCCESS,
+    STATUS_UNAVAILABLE,
+    find_madge_entrypoint,
+    find_madge_executable,
+    find_node_executable,
+    get_circular_dependencies,
+    get_dependency_map,
+    get_madge_version,
+    normalize_repo_relative_path,
+    resolve_madge_command,
+    run_madge,
+    run_subprocess_bounded,
+    sanitize_message,
+)
+
+__all__ = [
+    "run_madge",
+    "get_dependency_map",
+    "get_circular_dependencies",
+    "find_madge_executable",
+    "find_node_executable",
+    "find_madge_entrypoint",
+    "resolve_madge_command",
+    "run_subprocess_bounded",
+    "get_madge_version",
+    "normalize_repo_relative_path",
+    "sanitize_message",
+    "STATUS_SUCCESS",
+    "STATUS_PARTIAL",
+    "STATUS_FAILED",
+    "STATUS_UNAVAILABLE",
+    "ERR_MADGE_NOT_FOUND",
+    "ERR_MADGE_EXECUTION_FAILED",
+    "ERR_MADGE_TIMEOUT",
+    "ERR_MADGE_INVALID_JSON",
+    "ERR_MADGE_OUTPUT_LIMIT_EXCEEDED",
+    "ERR_REPOSITORY_PATH_INVALID",
+    "ERR_REPOSITORY_NOT_FOUND",
+    "ERR_MADGE_PARTIAL_OUTPUT",
+]

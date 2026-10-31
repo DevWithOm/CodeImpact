@@ -1,0 +1,10 @@
+{
+  "name": "codeimpact-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CodeImpact backend analysis tooling and dependencies",
+  "scripts": {},
+  "dependencies": {
+    "madge": "8.0.0"
+  }
+}
