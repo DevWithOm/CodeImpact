@@ -1,0 +1,250 @@
+{
+  "findings": [
+    {
+      "finding_id": "f_uf_80054d1b",
+      "category": "unused_file",
+      "title": "Potentially unused file",
+      "file_path": "src/serviceB.ts",
+      "start_line": null,
+      "end_line": null,
+      "symbol": null,
+      "source_tool": "knip",
+      "description": "No static import or entry-point reference was found for this file.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "static_reference_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "No static reference was found by the configured scan.",
+          "value": null
+        }
+      ],
+      "risk_factors": [
+        "File may be referenced dynamically or loaded via configuration."
+      ],
+      "metadata": {
+        "knip_issue_type": "files",
+        "original_path": "src/serviceB.ts"
+      }
+    },
+    {
+      "finding_id": "f_uf_8c55b158",
+      "category": "unused_file",
+      "title": "Potentially unused file",
+      "file_path": "src/serviceC.ts",
+      "start_line": null,
+      "end_line": null,
+      "symbol": null,
+      "source_tool": "knip",
+      "description": "No static import or entry-point reference was found for this file.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "static_reference_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "No static reference was found by the configured scan.",
+          "value": null
+        }
+      ],
+      "risk_factors": [
+        "File may be referenced dynamically or loaded via configuration."
+      ],
+      "metadata": {
+        "knip_issue_type": "files",
+        "original_path": "src/serviceC.ts"
+      }
+    },
+    {
+      "finding_id": "f_uf_41caf8ca",
+      "category": "unused_file",
+      "title": "Potentially unused file",
+      "file_path": "src/unused_file.ts",
+      "start_line": null,
+      "end_line": null,
+      "symbol": null,
+      "source_tool": "knip",
+      "description": "No static import or entry-point reference was found for this file.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "static_reference_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "No static reference was found by the configured scan.",
+          "value": null
+        }
+      ],
+      "risk_factors": [
+        "File may be referenced dynamically or loaded via configuration."
+      ],
+      "metadata": {
+        "knip_issue_type": "files",
+        "original_path": "src/unused_file.ts"
+      }
+    },
+    {
+      "finding_id": "f_ud_1140edf5",
+      "category": "unused_dependency",
+      "title": "Potentially unused dependency",
+      "file_path": "package.json",
+      "start_line": 9,
+      "end_line": 9,
+      "symbol": "lodash",
+      "source_tool": "knip",
+      "description": "Dependency 'lodash' listed in dependencies has no static import references.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "package_dependency_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "Dependency 'lodash' was not detected in any static import.",
+          "value": {
+            "line": 9,
+            "col": 6
+          }
+        }
+      ],
+      "risk_factors": [
+        "Package may be a peer dependency, binary CLI tool, or loaded via plugin config."
+      ],
+      "metadata": {
+        "knip_issue_type": "dependencies",
+        "package_name": "lodash"
+      }
+    },
+    {
+      "finding_id": "f_ue_33b84b50",
+      "category": "unused_export",
+      "title": "Potentially unused export",
+      "file_path": "src/utils.ts",
+      "start_line": 5,
+      "end_line": 5,
+      "symbol": "unusedHelper",
+      "source_tool": "knip",
+      "description": "Export 'unusedHelper' has no static import reference within the analyzed scope.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "static_reference_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "No direct static reference was returned by this configured scan.",
+          "value": {
+            "symbol": "unusedHelper",
+            "line": 5,
+            "col": 17
+          }
+        }
+      ],
+      "risk_factors": [
+        "Symbol may be consumed by external packages, dynamically imported, or used in tests."
+      ],
+      "metadata": {
+        "knip_issue_type": "exports",
+        "is_type": false
+      }
+    },
+    {
+      "finding_id": "f_ue_28a97311",
+      "category": "unused_export",
+      "title": "Potentially unused type export",
+      "file_path": "src/utils.ts",
+      "start_line": 9,
+      "end_line": 9,
+      "symbol": "UnusedType",
+      "source_tool": "knip",
+      "description": "Export 'UnusedType' has no static import reference within the analyzed scope.",
+      "evidence_class": "inconclusive",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "static_reference_scan",
+          "status": "not_found",
+          "source": "knip",
+          "details": "No direct static reference was returned by this configured scan.",
+          "value": {
+            "symbol": "UnusedType",
+            "line": 9,
+            "col": 18
+          }
+        }
+      ],
+      "risk_factors": [
+        "Symbol may be consumed by external packages, dynamically imported, or used in tests."
+      ],
+      "metadata": {
+        "knip_issue_type": "types",
+        "is_type": true
+      }
+    },
+    {
+      "finding_id": "f_dup_bde0bc82",
+      "category": "duplicate_code",
+      "title": "Duplicate code block",
+      "file_path": "src/serviceA.ts",
+      "start_line": 1,
+      "end_line": 9,
+      "symbol": null,
+      "source_tool": "jscpd",
+      "description": "Duplicate code block (9 lines) also found in 2 other location(s): src/serviceB.ts, src/serviceC.ts.",
+      "evidence_class": "strong",
+      "review_risk": "unknown",
+      "evidence": [
+        {
+          "kind": "duplicate_block",
+          "status": "found",
+          "source": "jscpd",
+          "details": "Identical or near-identical code lines detected across 3 locations.",
+          "value": {
+            "duplicate_lines": 9,
+            "tokens": 0,
+            "format": "typescript",
+            "matching_location_count": 2
+          }
+        }
+      ],
+      "risk_factors": [
+        "Duplicated logic increases maintenance overhead and risk of inconsistent updates."
+      ],
+      "metadata": {
+        "format": "typescript",
+        "duplicate_locations": [
+          {
+            "file_path": "src/serviceB.ts",
+            "start_line": 1,
+            "end_line": 9
+          },
+          {
+            "file_path": "src/serviceC.ts",
+            "start_line": 1,
+            "end_line": 9
+          }
+        ],
+        "duplicate_lines": 9,
+        "tokens": 0,
+        "fragment_preview": "(): void {\n  const records = [\"alpha\", \"beta\", \"gamma\", \"delta\"];\n  const formatted = records.map((item, index) => {\n    const prefix = `[SERVICE_A_INDEX_${index}]`;\n    const cleaned = item.toUpperCa",
+        "duplicate_group_size": 3
+      }
+    }
+  ],
+  "tool_coverage": {
+    "knip": {
+      "status": "completed",
+      "finding_count": 6,
+      "message": null
+    },
+    "jscpd": {
+      "status": "completed",
+      "finding_count": 1,
+      "message": null
+    }
+  }
+}

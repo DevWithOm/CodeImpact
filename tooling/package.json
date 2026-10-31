@@ -3,8 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "description": "CodeImpact backend analysis tooling and dependencies",
-  "scripts": {},
+  "scripts": {
+    "knip": "knip",
+    "jscpd": "jscpd"
+  },
   "dependencies": {
-    "madge": "8.0.0"
+    "jscpd": "4.0.5",
+    "knip": "5.45.0",
+    "madge": "8.0.0",
+    "typescript": "5.7.3"
   }
 }
