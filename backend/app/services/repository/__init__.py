@@ -34,3 +34,4 @@ __all__ = [
     "generate_analysis_id",
     "RepositoryRetrievalError",
 ]
+

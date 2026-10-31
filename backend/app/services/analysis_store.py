@@ -111,9 +111,12 @@ STAGE_PROGRESS_MAP: dict[str, tuple[int, str]] = {
 class AnalysisStore:
     """Thread-safe in-memory store for CodeImpact analysis jobs and findings."""
 
+    _shared_records: dict[str, AnalysisRecord] = {}
+    _shared_lock = threading.RLock()
+
     def __init__(self) -> None:
-        self._records: dict[str, AnalysisRecord] = {}
-        self._lock = threading.RLock()
+        self._records: dict[str, AnalysisRecord] = self._shared_records
+        self._lock = self._shared_lock
 
     def create_analysis(self, analysis_id: str, request: AnalysisRequest) -> AnalysisStatusResponse:
         with self._lock:

@@ -14,11 +14,6 @@ class ExplainResponse(BaseModel):
     summary: str = Field(..., description="Evidence-grounded explanation of the finding")
     why_it_matters: str = Field(..., description="Impact and maintenance importance")
     false_positive_scenarios: list[str] = Field(default_factory=list, description="Scenarios where code is actually used")
-    verification_steps: list[str] = Field(default_factory=list, description="Concrete developer verification checks")
-    suggested_action: str = Field(default="Review before making a change", description="Recommended next action")
-    limitations: list[str] = Field(default_factory=list, description="Tool and analysis limitations")
-
-    # Convenience aliases for frontend consumption
-    explanation: str | None = Field(default=None, description="Alias for summary")
-    potential_risks: list[str] = Field(default_factory=list, description="Alias for false_positive_scenarios")
-    uncertainty_notes: list[str] = Field(default_factory=list, description="Alias for limitations")
+    verification_steps: list[str] = Field(default_factory=list, description="Concrete validation steps")
+    suggested_action: str = Field(..., description="Recommended safe action")
+    limitations: list[str] = Field(default_factory=list, description="Static analysis blind spots")
