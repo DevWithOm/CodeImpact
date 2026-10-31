@@ -37,6 +37,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'findings', label: 'Findings', icon: Layers, badge: '5' },
     { id: 'graph', label: 'Dependency Graph', icon: GitBranch, badge: 'Cycle' },
     { id: 'ai', label: 'Contextual AI', icon: Sparkles, badge: 'Gemma 4' },
+    { id: 'reports', label: 'Reports & Export', icon: FileText, badge: 'PDF' },
     { id: 'matrix', label: 'Competitor Matrix', icon: Cpu, badge: null }
   ];
 

@@ -41,7 +41,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         setIsCollapsed={setIsSidebarCollapsed}
         activeRepo={activeRepo}
         branch={branch}
-        onOpenReport={() => setIsReportModalOpen(true)}
+        onOpenReport={() => setActiveTab('reports')}
       />
 
       {/* Main Content Area */}
@@ -52,7 +52,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           setActiveTab={setActiveTab}
           onTriggerScan={onTriggerScan}
           isScanning={isScanning}
-          onOpenReport={() => setIsReportModalOpen(true)}
+          onOpenReport={() => setActiveTab('reports')}
         />
 
         {/* Page Content */}

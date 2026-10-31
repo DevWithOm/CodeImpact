@@ -119,6 +119,8 @@ export interface ChatMessage {
   text: string;
   timestamp?: string;
   groundingFindingId?: string;
+  groundingFile?: string;
+  source?: 'backend-gemini' | 'grounded-engine';
 }
 
 export interface AnalysisSummary {
@@ -131,6 +133,28 @@ export interface AnalysisSummary {
   circularCyclesCount: number;
   hotspotRiskIndex: number;
   healthScore: string;
+}
+
+export interface GeneratedReport {
+  id: string;
+  repoUrl: string;
+  branch: string;
+  generatedAt: string;
+  format: 'PDF' | 'JSON' | 'CSV' | 'Markdown';
+  totalFindings: number;
+  criticalCount: number;
+  healthScore: string;
+  fileSize?: string;
+}
+
+export interface ReportCustomization {
+  includeExecutiveSummary: boolean;
+  includeFindingsOverview: boolean;
+  includeDependencyImpact: boolean;
+  includeTestImpact: boolean;
+  includeVerificationChecklist: boolean;
+  filterCategory: string;
+  filterSeverity: string;
 }
 
 export interface AnalysisScanStep {

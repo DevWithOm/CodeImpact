@@ -4,6 +4,7 @@ import { Overview } from './components/dashboard/Overview';
 import { FindingsPage } from './pages/Findings';
 import { DependencyGraph } from './components/graph/DependencyGraph';
 import { ContextualAI } from './components/ai/ContextualAI';
+import { ReportsPage } from './pages/Reports';
 import { CompetitorMatrix } from './components/matrix/CompetitorMatrix';
 
 import {
@@ -118,23 +119,28 @@ export default function App() {
   const handleAiAsk = async (promptText: string) => {
     if (!promptText.trim()) return;
 
+    const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     setAiChat((prev) => [
       ...prev,
-      { id: String(Date.now()), role: 'user', text: promptText }
+      { id: String(Date.now()), role: 'user', text: promptText, timestamp: timeStr }
     ]);
     setIsAiTyping(true);
 
     try {
       const currentFinding = activeFinding || findings[0];
-      const reply = await api.explainFinding(currentFinding, promptText);
+      const { text, source } = await api.explainFinding(currentFinding, promptText);
 
       setAiChat((prev) => [
         ...prev,
         {
           id: String(Date.now() + 1),
           role: 'assistant',
-          text: reply,
-          groundingFindingId: currentFinding.id
+          text,
+          groundingFindingId: currentFinding.id,
+          groundingFile: currentFinding.file,
+          source,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
     } catch {
@@ -143,7 +149,8 @@ export default function App() {
         {
           id: String(Date.now() + 1),
           role: 'assistant',
-          text: 'Error processing evidence query. Please check active finding context.'
+          text: 'Error processing evidence query. Please check active finding context.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);
     } finally {
@@ -258,10 +265,29 @@ export default function App() {
           isAiTyping={isAiTyping}
           onSendMessage={handleAiAsk}
           activeFinding={activeFinding}
+          findings={findings}
+          onSelectFinding={setActiveFinding}
+          onClearChat={() => setAiChat([])}
+          onNavigateToFindings={() => setActiveTab('findings')}
+          onNavigateToGraph={(f) => handleViewFindingInGraph(f)}
+          repoUrl={repoUrl}
+          branch={branch}
         />
       )}
 
-      {/* 5. Competitor Matrix */}
+      {/* 5. Reports & Export Dashboard */}
+      {activeTab === 'reports' && (
+        <ReportsPage
+          summary={summary}
+          findings={findings}
+          graphNodes={graphNodes}
+          graphEdges={graphEdges}
+          onNavigateToFindings={() => setActiveTab('findings')}
+          onNavigateToGraph={() => setActiveTab('graph')}
+        />
+      )}
+
+      {/* 6. Competitor Matrix */}
       {activeTab === 'matrix' && (
         <CompetitorMatrix competitors={COMPETITOR_MATRIX} />
       )}

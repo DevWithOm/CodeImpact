@@ -31,7 +31,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'findings', label: 'Findings', icon: Layers },
     { id: 'graph', label: 'Dependency Graph', icon: GitBranch },
     { id: 'ai', label: 'Contextual AI', icon: Sparkles },
-    { id: 'matrix', label: 'Competitor Matrix', icon: Cpu }
+    { id: 'reports', label: 'Reports', icon: FileDown },
+    { id: 'matrix', label: 'Matrix', icon: Cpu }
   ];
 
   return (
