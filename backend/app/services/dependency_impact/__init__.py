@@ -10,11 +10,29 @@ from backend.app.schemas.impact import (
     FindingImpactSummary,
     ImpactEvidence,
 )
+from backend.app.schemas.risk import (
+    FindingRiskResult,
+    RiskAnalysisResult,
+    RiskAssessment,
+    RiskFactorBreakdown,
+    RiskSummary,
+)
+from backend.app.schemas.test_impact import (
+    EntryPointEvidence,
+    FindingTestImpact,
+    FrameworkEvidence,
+    TestCandidate,
+    TestImpactAnalysisResult,
+    TestImpactSummary,
+)
 from backend.app.services.dependency_impact.cycle_detector import (
     canonicalize_cycle_chain,
     get_cycle_members,
     normalize_cycles,
     validate_cycles,
+)
+from backend.app.services.dependency_impact.entry_point_detector import (
+    detect_entry_points,
 )
 from backend.app.services.dependency_impact.finding_mapper import (
     MAPPING_STATUS_INVALID_PATH,
@@ -70,6 +88,49 @@ from backend.app.services.dependency_impact.madge_runner import (
     run_subprocess_bounded,
     sanitize_message,
 )
+from backend.app.services.dependency_impact.test_discovery import (
+    TEST_TYPE_CONFIG,
+    TEST_TYPE_E2E,
+    TEST_TYPE_INTEGRATION,
+    TEST_TYPE_UNIT,
+    TEST_TYPE_UNKNOWN,
+    classify_test_type,
+    discover_test_files,
+    discover_test_files_from_nodes,
+    is_test_file,
+    scan_repository_for_tests,
+)
+from backend.app.services.dependency_impact.test_framework_detector import (
+    detect_test_frameworks,
+)
+from backend.app.services.dependency_impact.test_impact_analyzer import (
+    analyze_test_impact,
+)
+from backend.app.services.dependency_impact.test_mapper import (
+    find_direct_test_dependants,
+    find_heuristic_test_matches,
+    find_transitive_test_dependants,
+    map_tests_for_finding,
+)
+from backend.app.services.dependency_impact.risk_scorer import (
+    RISK_LEVEL_HIGHER,
+    RISK_LEVEL_LOWER,
+    RISK_LEVEL_MEDIUM,
+    RISK_LEVEL_UNKNOWN,
+    calculate_risk_score,
+    classify_risk,
+)
+from backend.app.services.dependency_impact.risk_explainer import (
+    generate_mitigating_observations,
+    generate_positive_factors,
+    generate_recommendation,
+    generate_uncertainties,
+)
+from backend.app.services.dependency_impact.risk_analyzer import (
+    analyze_review_risk,
+    compute_completeness,
+    compute_confidence,
+)
 
 __all__ = [
     # Madge Runner
@@ -115,11 +176,58 @@ __all__ = [
     "IMPACT_STATUS_PARTIAL",
     "IMPACT_STATUS_UNAVAILABLE",
     "EVIDENCE_TYPE_STATIC_IMPORT",
+    # Test Discovery & Classification
+    "is_test_file",
+    "classify_test_type",
+    "discover_test_files",
+    "discover_test_files_from_nodes",
+    "scan_repository_for_tests",
+    "TEST_TYPE_UNIT",
+    "TEST_TYPE_INTEGRATION",
+    "TEST_TYPE_E2E",
+    "TEST_TYPE_CONFIG",
+    "TEST_TYPE_UNKNOWN",
+    # Framework & Entry-Point Detection
+    "detect_test_frameworks",
+    "detect_entry_points",
+    # Test Mapper & Analyzer
+    "map_tests_for_finding",
+    "find_direct_test_dependants",
+    "find_transitive_test_dependants",
+    "find_heuristic_test_matches",
+    "analyze_test_impact",
     # Impact Schemas
     "EnrichedFinding",
     "DirectDependant",
     "FindingImpactSummary",
     "ImpactEvidence",
+    # Test Impact Schemas
+    "TestCandidate",
+    "TestImpactSummary",
+    "FindingTestImpact",
+    "FrameworkEvidence",
+    "EntryPointEvidence",
+    "TestImpactAnalysisResult",
+    # Review-Risk Schemas
+    "RiskFactorBreakdown",
+    "RiskAssessment",
+    "FindingRiskResult",
+    "RiskSummary",
+    "RiskAnalysisResult",
+    # Review-Risk Engine
+    "analyze_review_risk",
+    "calculate_risk_score",
+    "classify_risk",
+    "compute_confidence",
+    "compute_completeness",
+    "generate_positive_factors",
+    "generate_mitigating_observations",
+    "generate_uncertainties",
+    "generate_recommendation",
+    "RISK_LEVEL_HIGHER",
+    "RISK_LEVEL_MEDIUM",
+    "RISK_LEVEL_LOWER",
+    "RISK_LEVEL_UNKNOWN",
     # Canonical Statuses & Error Codes
     "STATUS_SUCCESS",
     "STATUS_PARTIAL",

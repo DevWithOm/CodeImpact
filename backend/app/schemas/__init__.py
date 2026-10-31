@@ -15,6 +15,21 @@ from backend.app.schemas.graph import (
     GraphNode,
     GraphStats,
 )
+from backend.app.schemas.risk import (
+    FindingRiskResult,
+    RiskAnalysisResult,
+    RiskAssessment,
+    RiskFactorBreakdown,
+    RiskSummary,
+)
+from backend.app.schemas.test_impact import (
+    EntryPointEvidence,
+    FindingTestImpact,
+    FrameworkEvidence,
+    TestCandidate,
+    TestImpactAnalysisResult,
+    TestImpactSummary,
+)
 
 __all__ = [
     "GraphNode",
@@ -28,5 +43,15 @@ __all__ = [
     "ImpactEvidence",
     "DirectDependant",
     "FindingImpactSummary",
+    "TestCandidate",
+    "TestImpactSummary",
+    "FindingTestImpact",
+    "FrameworkEvidence",
+    "EntryPointEvidence",
+    "TestImpactAnalysisResult",
+    "RiskFactorBreakdown",
+    "RiskAssessment",
+    "FindingRiskResult",
+    "RiskSummary",
+    "RiskAnalysisResult",
 ]
-
