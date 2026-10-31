@@ -68,13 +68,32 @@ export interface GraphNode {
   val: number;
   filePath?: string;
   findingCount?: number;
+  incomingCount?: number;
+  outgoingCount?: number;
+  affectedModules?: string[];
+  affectedTests?: string[];
+  riskEvidence?: string;
+  verificationSteps?: string[];
+  cycleWith?: string[];
+  isEntry?: boolean;
 }
 
 export interface GraphEdge {
+  id?: string;
   from: string;
   to: string;
+  source?: string;
+  target?: string;
   isCycle?: boolean;
   label?: string;
+}
+
+export interface DependencyCycleInfo {
+  id: string;
+  name: string;
+  nodeIds: string[];
+  description: string;
+  severity: FindingSeverity;
 }
 
 export interface CompetitorRow {

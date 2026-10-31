@@ -1,5 +1,5 @@
-import { Finding, GraphNode, GraphEdge, AnalysisSummary, ChatMessage } from '../types';
-import { INITIAL_FINDINGS, GRAPH_NODES, GRAPH_EDGES, DEFAULT_SUMMARY } from './mockData';
+import { Finding, GraphNode, GraphEdge, DependencyCycleInfo, AnalysisSummary, ChatMessage } from '../types';
+import { INITIAL_FINDINGS, GRAPH_NODES, GRAPH_EDGES, GRAPH_CYCLES, DEFAULT_SUMMARY } from './mockData';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -73,7 +73,7 @@ export const api = {
   /**
    * Retrieves dependency graph nodes, edges, and cycle chains.
    */
-  async getDependencyGraph(_analysisId: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] }> {
+  async getDependencyGraph(_analysisId: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; cycles?: DependencyCycleInfo[] }> {
     try {
       if (BASE_URL) {
         const res = await fetch(`${BASE_URL}/api/analyses/${_analysisId}/graph`);
@@ -87,7 +87,8 @@ export const api = {
 
     return {
       nodes: GRAPH_NODES,
-      edges: GRAPH_EDGES
+      edges: GRAPH_EDGES,
+      cycles: GRAPH_CYCLES
     };
   },
 

@@ -11,6 +11,7 @@ import {
   INITIAL_FINDINGS,
   GRAPH_NODES,
   GRAPH_EDGES,
+  GRAPH_CYCLES,
   COMPETITOR_MATRIX,
   INITIAL_LOGS,
   DEFAULT_SUMMARY
@@ -169,8 +170,12 @@ export default function App() {
 
   // Handle viewing finding in dependency graph
   const handleViewFindingInGraph = (f: Finding) => {
+    const fileName = f.file.split('/').pop() || f.file;
     const matchingNode = graphNodes.find(
-      (n) => n.filePath === f.file || f.file.includes(n.label)
+      (n) =>
+        n.filePath === f.file ||
+        f.file.includes(n.label) ||
+        (n.label && n.label.toLowerCase() === fileName.toLowerCase())
     );
     if (matchingNode) {
       setSelectedGraphNode(matchingNode);
@@ -180,8 +185,12 @@ export default function App() {
 
   // Handle selecting node in graph and inspecting finding
   const handleInspectLinkedFindingsFromNode = (node: GraphNode) => {
+    const fileName = node.label.toLowerCase();
     const matchedFinding = findings.find(
-      (f) => f.file === node.filePath || f.file.includes(node.label)
+      (f) =>
+        f.file === node.filePath ||
+        f.file.includes(node.label) ||
+        f.file.toLowerCase().includes(fileName)
     );
     if (matchedFinding) {
       setActiveFinding(matchedFinding);
@@ -238,6 +247,7 @@ export default function App() {
           selectedNode={selectedGraphNode}
           setSelectedNode={setSelectedGraphNode}
           onInspectLinkedFindings={handleInspectLinkedFindingsFromNode}
+          cycles={GRAPH_CYCLES}
         />
       )}
 

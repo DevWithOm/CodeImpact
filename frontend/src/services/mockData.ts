@@ -1,4 +1,4 @@
-import { DemoRepo, Finding, GraphNode, GraphEdge, CompetitorRow, TerminalLog, AnalysisSummary } from '../types';
+import { DemoRepo, Finding, GraphNode, GraphEdge, DependencyCycleInfo, CompetitorRow, TerminalLog, AnalysisSummary } from '../types';
 
 export const DEMO_REPOS: DemoRepo[] = [
   { name: 'facebook/react', label: 'React Core', branch: 'main', stars: '220k', health: '89%', description: 'UI library for web and native interfaces' },
@@ -273,24 +273,170 @@ export function parseBadgeDate(isoString: string): string {
 ];
 
 export const GRAPH_NODES: GraphNode[] = [
-  { id: 'app', label: 'App.tsx', type: 'entry', risk: 'low', x: 220, y: 70, val: 30, filePath: 'src/App.tsx', findingCount: 0 },
-  { id: 'auth', label: 'sessionProvider.tsx', type: 'cycle', risk: 'high', x: 90, y: 190, val: 45, filePath: 'src/auth/sessionProvider.tsx', findingCount: 1 },
-  { id: 'user', label: 'userProfile.tsx', type: 'cycle', risk: 'high', x: 330, y: 190, val: 45, filePath: 'src/user/userProfile.tsx', findingCount: 1 },
-  { id: 'format', label: 'formatters.ts', type: 'duplicate', risk: 'medium', x: 480, y: 120, val: 25, filePath: 'src/utils/formatters.ts', findingCount: 1 },
-  { id: 'legacy', label: 'legacyCalculator.ts', type: 'unused', risk: 'low', x: 50, y: 320, val: 20, filePath: 'src/analytics/legacyCalculator.ts', findingCount: 1 },
-  { id: 'v1', label: 'v1Adapter.ts', type: 'unused', risk: 'medium', x: 490, y: 310, val: 22, filePath: 'src/legacy/v1Adapter.ts', findingCount: 1 },
-  { id: 'emitter', label: 'eventEmitter.ts', type: 'hotspot', risk: 'high', x: 250, y: 340, val: 50, filePath: 'src/core/eventEmitter.ts', findingCount: 1 }
+  {
+    id: 'app',
+    label: 'App.tsx',
+    type: 'entry',
+    risk: 'low',
+    x: 280,
+    y: 40,
+    val: 30,
+    filePath: 'src/App.tsx',
+    findingCount: 0,
+    incomingCount: 0,
+    outgoingCount: 3,
+    affectedModules: ['src/auth/sessionProvider.tsx', 'src/utils/formatters.ts', 'src/core/eventEmitter.ts'],
+    affectedTests: ['tests/app.test.tsx'],
+    riskEvidence: 'Top-level application composition root. Imports auth, formatting, and telemetry event emitter.',
+    verificationSteps: ['Do not delete application entrypoint.', 'Ensure lazy-loaded routes compile.'],
+    isEntry: true
+  },
+  {
+    id: 'auth',
+    label: 'sessionProvider.tsx',
+    type: 'cycle',
+    risk: 'high',
+    x: 100,
+    y: 180,
+    val: 45,
+    filePath: 'src/auth/sessionProvider.tsx',
+    findingCount: 1,
+    incomingCount: 2,
+    outgoingCount: 2,
+    affectedModules: ['src/user/userProfile.tsx', 'src/core/eventEmitter.ts'],
+    affectedTests: ['tests/auth/session.test.tsx', 'tests/user/profile.test.tsx'],
+    riskEvidence: 'Part of Circular Dependency Cycle #1 with userProfile.tsx. Mutual import creates undefined binding risks during bundler evaluation.',
+    verificationSteps: [
+      'Extract shared SessionUser type into separate types/auth.ts module.',
+      'Refactor session state provider to avoid direct coupling with userProfile component.',
+      'Run test suite with isolated module mock.'
+    ],
+    cycleWith: ['user']
+  },
+  {
+    id: 'user',
+    label: 'userProfile.tsx',
+    type: 'cycle',
+    risk: 'high',
+    x: 440,
+    y: 180,
+    val: 45,
+    filePath: 'src/user/userProfile.tsx',
+    findingCount: 1,
+    incomingCount: 2,
+    outgoingCount: 2,
+    affectedModules: ['src/auth/sessionProvider.tsx', 'src/core/eventEmitter.ts'],
+    affectedTests: ['tests/user/profile.test.tsx'],
+    riskEvidence: 'Circular dependency recipient. Imports session context while session provider imports UserAvatar and profile helpers.',
+    verificationSteps: [
+      'Decouple UserAvatar into standalone component.',
+      'Inject session data via React context without direct circular file import.',
+      'Confirm Madge cycle report drops to 0 cycles after refactor.'
+    ],
+    cycleWith: ['auth']
+  },
+  {
+    id: 'format',
+    label: 'formatters.ts',
+    type: 'duplicate',
+    risk: 'medium',
+    x: 620,
+    y: 100,
+    val: 25,
+    filePath: 'src/utils/formatters.ts',
+    findingCount: 1,
+    incomingCount: 1,
+    outgoingCount: 1,
+    affectedModules: ['src/legacy/v1Adapter.ts'],
+    affectedTests: ['tests/utils/formatters.test.ts'],
+    riskEvidence: 'Contains duplicate string parser clone flagged by jscpd. Linked downstream to legacy adapter.',
+    verificationSteps: [
+      'Consolidate regex tokenizers with common utility.',
+      'Ensure internationalized date representations are preserved in tests.'
+    ]
+  },
+  {
+    id: 'legacy',
+    label: 'legacyCalculator.ts',
+    type: 'unused',
+    risk: 'low',
+    x: 60,
+    y: 350,
+    val: 20,
+    filePath: 'src/analytics/legacyCalculator.ts',
+    findingCount: 1,
+    incomingCount: 0,
+    outgoingCount: 0,
+    affectedModules: [],
+    affectedTests: ['tests/analytics/legacyCalculator.test.ts'],
+    riskEvidence: 'Zero incoming dependency edges. No static references found across entire workspace by Knip AST analyzer.',
+    verificationSteps: [
+      'Check git blame to confirm feature retirement date.',
+      'Confirm no dynamic window.calculator or reflection API invocations.',
+      'Deprecate file in staging build before removal.'
+    ]
+  },
+  {
+    id: 'v1',
+    label: 'v1Adapter.ts',
+    type: 'unused',
+    risk: 'medium',
+    x: 620,
+    y: 320,
+    val: 22,
+    filePath: 'src/legacy/v1Adapter.ts',
+    findingCount: 1,
+    incomingCount: 1,
+    outgoingCount: 0,
+    affectedModules: [],
+    affectedTests: ['tests/legacy/adapter.test.ts'],
+    riskEvidence: 'Legacy protocol bridge only consumed by formatting utility; no active external consumers.',
+    verificationSteps: [
+      'Verify if v1 external API customers have all completed migration to v2 REST endpoints.',
+      'Archive adapter with deprecation notice prior to deletion.'
+    ]
+  },
+  {
+    id: 'emitter',
+    label: 'eventEmitter.ts',
+    type: 'hotspot',
+    risk: 'high',
+    x: 280,
+    y: 340,
+    val: 50,
+    filePath: 'src/core/eventEmitter.ts',
+    findingCount: 1,
+    incomingCount: 3,
+    outgoingCount: 0,
+    affectedModules: ['src/App.tsx', 'src/auth/sessionProvider.tsx', 'src/user/userProfile.tsx'],
+    affectedTests: ['tests/core/emitter.test.ts', 'tests/integration/app.test.ts'],
+    riskEvidence: 'Critical dependency hotspot. High fan-in module imported by multiple core domains. Any interface modification has immediate widespread impact.',
+    verificationSteps: [
+      'Maintain backwards compatibility on all listener callbacks.',
+      'Run full end-to-end integration test suite before merging any changes.'
+    ]
+  }
 ];
 
 export const GRAPH_EDGES: GraphEdge[] = [
-  { from: 'app', to: 'auth' },
-  { from: 'app', to: 'format' },
-  { from: 'auth', to: 'user', isCycle: true, label: 'Cycle Link A' },
-  { from: 'user', to: 'auth', isCycle: true, label: 'Cycle Link B' },
-  { from: 'auth', to: 'emitter' },
-  { from: 'user', to: 'emitter' },
-  { from: 'app', to: 'emitter' },
-  { from: 'format', to: 'v1' }
+  { id: 'e-app-auth', from: 'app', to: 'auth', source: 'app', target: 'auth' },
+  { id: 'e-app-format', from: 'app', to: 'format', source: 'app', target: 'format' },
+  { id: 'e-auth-user', from: 'auth', to: 'user', source: 'auth', target: 'user', isCycle: true, label: 'Cycle Link A' },
+  { id: 'e-user-auth', from: 'user', to: 'auth', source: 'user', target: 'auth', isCycle: true, label: 'Cycle Link B' },
+  { id: 'e-auth-emitter', from: 'auth', to: 'emitter', source: 'auth', target: 'emitter' },
+  { id: 'e-user-emitter', from: 'user', to: 'emitter', source: 'user', target: 'emitter' },
+  { id: 'e-app-emitter', from: 'app', to: 'emitter', source: 'app', target: 'emitter' },
+  { id: 'e-format-v1', from: 'format', to: 'v1', source: 'format', target: 'v1' }
+];
+
+export const GRAPH_CYCLES: DependencyCycleInfo[] = [
+  {
+    id: 'cycle-1',
+    name: 'Cycle #1: sessionProvider ⇄ userProfile',
+    nodeIds: ['auth', 'user'],
+    description: 'Mutual import between src/auth/sessionProvider.tsx and src/user/userProfile.tsx detected by Madge dependency analyzer.',
+    severity: 'High'
+  }
 ];
 
 export const COMPETITOR_MATRIX: CompetitorRow[] = [
