@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Query, status
 
+from app.schemas.ai import ExplainRequest, ExplainResponse
 from app.schemas.analysis import AnalysisStatusResponse
 from app.schemas.finding import FindingDetail, FindingsListResponse
 from app.schemas.graph import GraphResponse
+from app.services.ai import AIServiceUnavailableError, gemini_service
 from app.services.analysis_store import analysis_store
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
@@ -114,3 +116,38 @@ async def get_analysis_graph(analysis_id: str) -> GraphResponse:
             detail=f"Graph for analysis '{analysis_id}' was not found.",
         )
     return graph
+
+
+@router.post(
+    "/{analysis_id}/explain",
+    response_model=ExplainResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Generate AI explanation for finding",
+    description="Generates an evidence-grounded AI explanation and cleanup recommendation for a specific finding using Gemini.",
+)
+async def explain_finding(analysis_id: str, request: ExplainRequest) -> ExplainResponse:
+    analysis = analysis_store.get_analysis(analysis_id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Analysis '{analysis_id}' was not found.",
+        )
+
+    finding = analysis_store.get_finding(analysis_id, request.finding_id)
+    if finding is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Finding '{request.finding_id}' not found in analysis '{analysis_id}'.",
+        )
+
+    try:
+        return await gemini_service.explain_finding(
+            finding=finding,
+            repo_name=analysis.repository,
+            fallback_on_error=False,
+        )
+    except AIServiceUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc

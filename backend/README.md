@@ -10,7 +10,7 @@
 The CodeImpact backend coordinates repository analysis for JavaScript and TypeScript projects. It orchestrates:
 - **Repository Retrieval & Static Analysis (Person 2 - OM_2):** Git clone, Knip, and jscpd execution.
 - **Dependency Graph & Impact Analysis (Person 3 - SAMAR_3):** Madge import mapping, circular dependency detection, and risk scoring.
-- **AI Explanations & Safe Recommendations (Person 4 - TANUJA_4):** Grounded Gemini explanations (Phase 4).
+- **AI Explanations & Safe Recommendations (Person 4 - TANUJA_4):** Evidence-grounded Gemini explanations and verification steps.
 - **Audit Report Generation (Person 4 - TANUJA_4):** Markdown reports (Phase 5).
 
 ---
@@ -21,16 +21,16 @@ The CodeImpact backend coordinates repository analysis for JavaScript and TypeSc
 backend/
 ├── API_CONTRACT.md          # Authoritative shared API contract
 ├── README.md                # This setup and run guide
-├── requirements.txt         # Pinned Python dependencies
-├── .env.example             # Environment template
+├── requirements.txt         # Pinned Python dependencies (including google-genai)
+├── .env.example             # Environment template with Gemini variables
 ├── app/
 │   ├── main.py              # FastAPI entry point, CORS, exception handlers
 │   ├── core/
 │   │   └── config.py        # Pydantic Settings application configuration
 │   ├── api/
 │   │   ├── repositories.py  # POST /api/repositories/analyse
-│   │   ├── analyses.py      # GET /api/analyses/{id}, findings, finding detail, graph
-│   │   ├── ai.py            # AI explanation routes (Phase 4)
+│   │   ├── analyses.py      # GET status, findings, detail, graph, POST explain
+│   │   ├── ai.py            # AI route reference
 │   │   └── reports.py       # Markdown report download routes (Phase 5)
 │   ├── schemas/
 │   │   ├── common.py        # ErrorDetail, ErrorResponse models
@@ -46,7 +46,10 @@ backend/
 │   │   └── dependency_impact_adapter.py # Person 3 (Madge) adapter
 │   ├── services/
 │   │   ├── analysis_store.py # Thread-safe in-memory job & findings store
-│   │   └── orchestrator.py  # Background pipeline coordinator
+│   │   ├── orchestrator.py  # Background pipeline coordinator
+│   │   └── ai/              # Gemini AI service and prompt templates
+│   │       ├── gemini_service.py   # Google GenAI client and generation logic
+│   │       └── prompt_templates.py # Grounded prompt builder & deterministic fallback
 │   └── utils/               # Subprocess and filesystem utilities
 └── tests/
     ├── test_health.py           # Health check probe test
@@ -56,7 +59,10 @@ backend/
     ├── test_analysis_store.py   # In-memory store operations & metrics tests
     ├── test_lifecycle.py        # Status lifecycle transitions tests
     ├── test_orchestrator.py     # Background pipeline & failure recovery tests
-    └── test_analyses_api.py     # Analyses, findings, and graph API tests
+    ├── test_analyses_api.py     # Analyses, findings, and graph API tests
+    ├── test_ai_prompt.py        # Grounded prompt building and fallback tests
+    ├── test_ai_service.py       # Gemini client mocking, parsing, and errors
+    └── test_ai_endpoint.py      # POST /explain endpoint integration tests
 ```
 
 ---
@@ -78,15 +84,24 @@ backend/
 
 ---
 
-## 4. Teammate Module Integration Status
+## 4. Gemini AI Explanations & Cleanup Recommendations
 
-- **Person 2 (OM_2 - Static Analysis):** Adapter interface defined in `app/adapters/static_analysis_adapter.py`. Ready to bind to `app.services.static_analysis.analyzer.analyze_repository`. If the module is pending or unpopulated, the adapter logs the pending status and tracks coverage accordingly.
-- **Person 3 (SAMAR_3 - Dependency Impact):** Adapter interface defined in `app/adapters/dependency_impact_adapter.py`. Ready to bind to `app.services.dependency_impact.impact_analyzer.analyze_impact`.
-- **Person 1 (BHOOMI_1 - Frontend):** All 5 core Phase 3 endpoints are live, returning typed JSON with `snake_case` properties and CORS enabled for `http://localhost:5173`.
+- **Endpoint:** `POST /api/analyses/{analysis_id}/explain` with `{ "finding_id": "f_..." }`.
+- **Grounded Context:** Prompts incorporate the finding's file path, line numbers, symbols, source tool evidence items, review risk, and dependency impact (direct dependents, test suites, and cycle membership).
+- **Core Guidelines:**
+  - Never guarantees code is safe to delete. Uses cautious phrasing ("potentially unused", "candidate for review").
+  - Identifies plausible false-positive scenarios (dynamic imports, runtime reflection, framework conventions).
+  - Outlines concrete verification steps for developers before making changes.
+  - Transparently acknowledges static analysis limitations.
+- **Structured Schema:** Uses `google-genai` JSON schema enforcement matching `ExplainResponse`.
+- **Graceful Degradation:**
+  - The backend and `/health` probe start normally even without a `GEMINI_API_KEY`.
+  - When unconfigured, `/explain` returns an informative `503 Service Unavailable` with error code `AI_SERVICE_UNAVAILABLE`.
+  - An evidence-grounded deterministic fallback generator is available when offline or during API quota limits.
 
 ---
 
-## 5. Endpoints Available in Phase 3
+## 5. Endpoints Available in Phase 4
 
 | Method | Endpoint | Description | Status Code |
 | :--- | :--- | :--- | :--- |
@@ -96,6 +111,7 @@ backend/
 | `GET` | `/api/analyses/{analysis_id}/findings` | Paginated, filterable findings explorer | `200 OK` (or `404`) |
 | `GET` | `/api/analyses/{analysis_id}/findings/{finding_id}` | Detailed finding evidence & test candidates | `200 OK` (or `404`) |
 | `GET` | `/api/analyses/{analysis_id}/graph` | Directed dependency graph & detected cycles | `200 OK` (or `404`) |
+| `POST` | `/api/analyses/{analysis_id}/explain` | Grounded AI explanation & recommendations | `200 OK` (or `404`, `503`) |
 
 Interactive Swagger documentation is available at `http://localhost:8000/docs`.
 
@@ -119,7 +135,10 @@ pip install -r requirements.txt
 # 4. Copy environment configuration
 Copy-Item .env.example .env
 
-# 5. Run the FastAPI development server
+# 5. Set Gemini API key (optional for local AI features)
+# $env:GEMINI_API_KEY="your-key-here"
+
+# 6. Run the FastAPI development server
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
@@ -144,4 +163,4 @@ Run the automated test suite inside the `backend` directory:
 python -m pytest
 ```
 
-All 33 tests cover health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, and API endpoints.
+All 44 automated tests verify health probes, input validation, in-memory store operations, metrics calculation, lifecycle transitions, background orchestration, partial failure recovery, API endpoints, prompt templates, mock Gemini generation, and error handling.

@@ -61,6 +61,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
             error_code = "NOT_FOUND"
         elif exc.status_code == status.HTTP_400_BAD_REQUEST:
             error_code = "BAD_REQUEST"
+        elif exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            error_code = "AI_SERVICE_UNAVAILABLE"
 
     return JSONResponse(
         status_code=exc.status_code,

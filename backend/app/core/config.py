@@ -15,5 +15,9 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     frontend_origin: str = "http://localhost:5173"
 
+    # Gemini AI configuration
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+
 
 settings = Settings()
