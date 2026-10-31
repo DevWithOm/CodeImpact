@@ -9,8 +9,12 @@ import os
 from pathlib import Path
 from typing import Any
 
-from backend.app.schemas.evidence import EvidenceItem
-from backend.app.schemas.finding import Finding
+try:
+    from backend.app.schemas.evidence import EvidenceItem
+    from backend.app.schemas.finding import Finding
+except ImportError:
+    from app.schemas.evidence import EvidenceItem
+    from app.schemas.finding import Finding
 
 
 def _generate_finding_id(prefix: str, identity_string: str) -> str:

@@ -26,6 +26,19 @@ TS_EXTENSIONS = {".ts", ".tsx", ".mts", ".cts"}
 SUPPORTED_EXTENSIONS = JS_EXTENSIONS | TS_EXTENSIONS
 
 
+def normalize_relative_path(path_str: str, base_dir: str | None = None) -> str:
+    """Normalizes a file path to POSIX style relative to base_dir if provided."""
+    if not path_str:
+        return ""
+    p = Path(path_str)
+    if base_dir and p.is_absolute():
+        try:
+            return p.resolve().relative_to(Path(base_dir).resolve()).as_posix()
+        except ValueError:
+            pass
+    return p.as_posix()
+
+
 def is_safe_path(base_dir: str, target_path: str) -> bool:
     """Verifies that target_path resides within base_dir to prevent path traversal.
 

@@ -7,11 +7,18 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-from backend.app.schemas.analysis import ToolCoverageItem
-from backend.app.schemas.finding import Finding
-from backend.app.services.static_analysis.normalizer import normalize_jscpd_findings
-from backend.app.utils.file_utils import is_safe_path, scan_repository_files
-from backend.app.utils.subprocess_runner import redact_secrets, run_command
+try:
+    from backend.app.schemas.analysis import ToolCoverageItem
+    from backend.app.schemas.finding import Finding
+    from backend.app.services.static_analysis.normalizer import normalize_jscpd_findings
+    from backend.app.utils.file_utils import is_safe_path, scan_repository_files
+    from backend.app.utils.subprocess_runner import redact_secrets, run_command
+except ImportError:
+    from app.schemas.analysis import ToolCoverageItem
+    from app.schemas.finding import Finding
+    from app.services.static_analysis.normalizer import normalize_jscpd_findings
+    from app.utils.file_utils import is_safe_path, scan_repository_files
+    from app.utils.subprocess_runner import redact_secrets, run_command
 
 
 logger = logging.getLogger(__name__)

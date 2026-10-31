@@ -7,9 +7,24 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from backend.app.schemas.analysis import AnalysisResult, ToolCoverageItem
-from backend.app.services.static_analysis.jscpd_runner import run_jscpd_analysis
-from backend.app.services.static_analysis.knip_runner import run_knip_analysis
+try:
+    from backend.app.schemas.analysis import AnalysisResult, ToolCoverageItem
+    from backend.app.services.repository.github_service import retrieve_repository
+    from backend.app.services.repository.workspace import cleanup_workspace
+    from backend.app.services.static_analysis.jscpd_runner import run_jscpd_analysis
+    from backend.app.services.static_analysis.knip_runner import run_knip_analysis
+except ImportError:
+    from app.schemas.analysis import AnalysisResult, ToolCoverageItem
+    from app.services.repository.github_service import retrieve_repository
+    from app.services.repository.workspace import cleanup_workspace
+    from app.services.static_analysis.jscpd_runner import run_jscpd_analysis
+    from app.services.static_analysis.knip_runner import run_knip_analysis
+
+__all__ = [
+    "analyze_repository",
+    "retrieve_repository",
+    "cleanup_workspace",
+]
 
 
 logger = logging.getLogger(__name__)
