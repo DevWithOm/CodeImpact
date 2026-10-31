@@ -2,9 +2,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExplainRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     finding_id: str = Field(..., description="ID of the finding to generate explanation for", examples=["f_001"])
+    prompt: str | None = Field(default=None, description="Optional custom prompt or user query")
 
 
 class ExplainResponse(BaseModel):

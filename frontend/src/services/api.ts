@@ -298,19 +298,23 @@ export const api = {
 
       if (res.ok) {
         const data = await res.json();
-        if (data.explanation) {
+        const explanation = data.explanation || data.summary;
+        if (explanation) {
+          const risks = data.potential_risks || data.false_positive_scenarios || [];
+          const steps = data.verification_steps || [];
+          const limits = data.uncertainty_notes || data.limitations || [];
           const formatted = `### AI Assessment: ${finding.title}
 
-${data.explanation}
+${explanation}
 
-**Potential Cleanup Risks:**
-${(data.potential_risks || []).map((r: string) => `- ${r}`).join('\n') || '- None documented.'}
+${data.why_it_matters ? `**Why It Matters:**\n${data.why_it_matters}\n\n` : ''}**Potential Cleanup Risks & Edge Cases:**
+${risks.map((r: string) => `- ${r}`).join('\n') || '- None documented.'}
 
 **Verification Steps:**
-${(data.verification_steps || []).map((v: string, i: number) => `${i + 1}. ${v}`).join('\n') || '1. Run test suite.\n2. Check call sites.'}
+${steps.map((v: string, i: number) => `${i + 1}. ${v}`).join('\n') || '1. Run test suite.\n2. Check call sites.'}
 
 > [!CAUTION]
-> **Limitations**: ${(data.uncertainty_notes || []).join(' ') || 'Static analysis cannot prove dynamic runtime reachability.'}`;
+> **Limitations**: ${limits.join(' ') || 'Static analysis cannot prove dynamic runtime reachability.'}`;
           return { text: formatted, source: 'backend-gemini' };
         }
       }

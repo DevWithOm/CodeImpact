@@ -5,20 +5,6 @@ from typing import Any
 import uuid
 
 try:
-    from backend.app.adapters.base import (
-        DependencyImpactAdapterProtocol,
-        RepositoryAdapterProtocol,
-        StaticAnalysisAdapterProtocol,
-    )
-    from backend.app.adapters.dependency_impact_adapter import DependencyImpactAdapter
-    from backend.app.adapters.repository_adapter import RepositoryAdapter
-    from backend.app.adapters.static_analysis_adapter import StaticAnalysisAdapter
-    from backend.app.schemas.analysis import AnalysisRequest, AnalysisStatus
-    from backend.app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
-    from backend.app.schemas.finding import FindingItem
-    from backend.app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
-    from backend.app.services.analysis_store import AnalysisStore, analysis_store as default_store
-except ImportError:
     from app.adapters.base import (
         DependencyImpactAdapterProtocol,
         RepositoryAdapterProtocol,
@@ -32,6 +18,20 @@ except ImportError:
     from app.schemas.finding import FindingItem
     from app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
     from app.services.analysis_store import AnalysisStore, analysis_store as default_store
+except ImportError:
+    from backend.app.adapters.base import (
+        DependencyImpactAdapterProtocol,
+        RepositoryAdapterProtocol,
+        StaticAnalysisAdapterProtocol,
+    )
+    from backend.app.adapters.dependency_impact_adapter import DependencyImpactAdapter
+    from backend.app.adapters.repository_adapter import RepositoryAdapter
+    from backend.app.adapters.static_analysis_adapter import StaticAnalysisAdapter
+    from backend.app.schemas.analysis import AnalysisRequest, AnalysisStatus
+    from backend.app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
+    from backend.app.schemas.finding import FindingItem
+    from backend.app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
+    from backend.app.services.analysis_store import AnalysisStore, analysis_store as default_store
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ class AnalysisOrchestrator:
 
     async def run_pipeline(self, analysis_id: str) -> None:
         """Executes the analysis pipeline in the background."""
-        record_info = self.store.get_analysis(analysis_id)
+        record_info = self.store.get_record(analysis_id)
         if record_info is None:
             logger.error("Cannot run pipeline: analysis %s not found in store", analysis_id)
             return
@@ -255,8 +255,13 @@ class AnalysisOrchestrator:
         try:
             # Stage 1: Repository Retrieval
             try:
+                repo_url = record_info.repository_url or (
+                    f"https://github.com/{record_info.repository}"
+                    if not record_info.repository.startswith("http")
+                    else record_info.repository
+                )
                 retrieval = self.repo_adapter.retrieve_repository(
-                    repository_url=record_info.repository,
+                    repository_url=repo_url,
                     branch=record_info.branch,
                     analysis_id=analysis_id,
                 )

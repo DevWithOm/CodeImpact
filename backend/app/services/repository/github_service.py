@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 
 try:
     from backend.app.services.repository.workspace import cleanup_workspace, create_workspace
@@ -55,6 +56,10 @@ def validate_github_url(url: str) -> tuple[str, str, str]:
         raise RepositoryRetrievalError("Repository URL contains forbidden control characters.")
 
     cleaned_url = url.strip()
+
+    # Allow owner/repo shorthand (e.g. "octocat/Hello-World")
+    if "/" in cleaned_url and not cleaned_url.startswith(("http://", "https://", "git://", "ssh://")):
+        cleaned_url = f"https://github.com/{cleaned_url.removeprefix('github.com/')}"
 
     # Reject embedded credentials (e.g. https://user:pass@github.com/...)
     if "@" in cleaned_url:
@@ -155,6 +160,15 @@ def retrieve_repository(
     # 3. Workspace Creation
     aid, workspace_path = create_workspace(analysis_id)
 
+    # Empty pre-created files/dirs in workspace so git clone succeeds into an empty directory
+    ws_path_obj = Path(workspace_path)
+    if ws_path_obj.exists():
+        for child in ws_path_obj.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+
     try:
         # 4. Clone execution using shallow clone (--depth 1)
         clone_cmd = ["git", "clone", "--depth", "1"]
@@ -169,6 +183,21 @@ def retrieve_repository(
             env={"GIT_TERMINAL_PROMPT": "0"},  # Never prompt for passwords
         )
 
+        if not clone_result.succeeded and valid_branch and "Remote branch" in (clone_result.stderr or ""):
+            for child in ws_path_obj.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+            fallback_cmd = ["git", "clone", "--depth", "1", normalized_url, workspace_path]
+            clone_result = run_command(
+                fallback_cmd,
+                timeout=CLONE_TIMEOUT_SECONDS,
+                env={"GIT_TERMINAL_PROMPT": "0"},
+            )
+            if clone_result.succeeded:
+                warnings.append(f"Requested branch '{valid_branch}' not found; checked out default remote branch.")
+
         if not clone_result.succeeded:
             error_msg = clone_result.stderr.strip() or clone_result.stdout.strip()
             # Clean up the workspace immediately on failure
@@ -178,6 +207,9 @@ def retrieve_repository(
                 + (f" on branch '{branch}'" if branch else "")
                 + f": {redact_secrets(error_msg)}"
             )
+
+        # Re-create reports directory in cloned workspace
+        (ws_path_obj / ".codeimpact" / "reports").mkdir(parents=True, exist_ok=True)
 
         # 5. Extract Commit SHA
         sha_result = run_command(
