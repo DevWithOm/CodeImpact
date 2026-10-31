@@ -41,12 +41,17 @@ export default {
         scanLine: {
           '0%': { top: '0%' },
           '100%': { top: '100%' },
+        },
+        fadeIn: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         }
       },
       animation: {
         marquee: 'marquee 30s linear infinite',
         pulseGlow: 'pulseGlow 2s ease-in-out infinite',
         scanLine: 'scanLine 3s linear infinite',
+        fadeIn: 'fadeIn 0.4s ease-out forwards',
       }
     },
   },

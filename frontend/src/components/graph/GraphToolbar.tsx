@@ -9,8 +9,7 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  RotateCcw,
-  Sparkles
+  RotateCcw
 } from 'lucide-react';
 
 interface GraphToolbarProps {

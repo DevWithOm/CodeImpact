@@ -2,14 +2,11 @@ import React, { useState } from 'react';
 import {
   FileCode,
   GitBranch,
-  ShieldAlert,
-  Layers,
   ArrowDownLeft,
   ArrowUpRight,
   ExternalLink,
   ChevronDown,
   CheckCircle2,
-  AlertTriangle,
   FolderGit2,
   Check,
   Target

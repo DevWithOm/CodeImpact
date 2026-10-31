@@ -9,8 +9,7 @@ import {
   ShieldCheck,
   Zap,
   ChevronLeft,
-  ChevronRight,
-  ExternalLink
+  ChevronRight
 } from 'lucide-react';
 
 interface SidebarProps {

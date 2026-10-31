@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Copy, Check, AlertTriangle, Info, Lightbulb, ShieldAlert } from 'lucide-react';
+import { Copy, Check, Info, Lightbulb, ShieldAlert } from 'lucide-react';
 
 interface MarkdownViewerProps {
   content: string;
@@ -121,13 +121,12 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ content }) => {
       elements.push(
         <div
           key={`quote-${lineIdx}`}
-          className={`my-3 p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-2.5 ${
-            quoteType === 'CAUTION'
+          className={`my-3 p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-2.5 ${quoteType === 'CAUTION'
               ? 'bg-red-50/90 border-red-200 text-red-950 font-medium'
               : quoteType === 'TIP'
-              ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950 font-medium'
-              : 'bg-blue-50/90 border-blue-200 text-blue-950 font-medium'
-          }`}
+                ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950 font-medium'
+                : 'bg-blue-50/90 border-blue-200 text-blue-950 font-medium'
+            }`}
         >
           {quoteType === 'CAUTION' && <ShieldAlert className="w-4 h-4 text-[#FF2E55] shrink-0 mt-0.5" />}
           {quoteType === 'TIP' && <Lightbulb className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />}
@@ -201,11 +200,10 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ content }) => {
     elements.push(
       <div
         key="quote-end"
-        className={`my-3 p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-2.5 ${
-          quoteType === 'CAUTION'
+        className={`my-3 p-3.5 rounded-2xl border text-xs leading-relaxed flex items-start gap-2.5 ${quoteType === 'CAUTION'
             ? 'bg-red-50/90 border-red-200 text-red-950 font-medium'
             : 'bg-blue-50/90 border-blue-200 text-blue-950 font-medium'
-        }`}
+          }`}
       >
         <ShieldAlert className="w-4 h-4 text-[#FF2E55] shrink-0 mt-0.5" />
         <div>{renderFormattedText(blockQuoteBuffer.join(' '))}</div>
