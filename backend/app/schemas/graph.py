@@ -21,12 +21,16 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """Represents a directed import edge (source imports target)."""
-    id: str = Field(description="Unique edge identifier, formatted as 'source->target'")
-    source: str = Field(description="Repository-relative path of importing module")
-    target: str = Field(description="Repository-relative path of imported module")
+    id: str = Field(default="", description="Unique edge identifier, formatted as 'source->target'")
+    source: str = Field(default="", description="Repository-relative path of importing module")
+    target: str = Field(default="", description="Repository-relative path of imported module")
     relationship: str = Field(default="imports", description="Canonical edge relationship")
 
     model_config = ConfigDict(extra="allow")
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.id and self.source and self.target:
+            self.id = f"{self.source}->{self.target}"
 
 
 class GraphStats(BaseModel):

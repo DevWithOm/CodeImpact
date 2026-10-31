@@ -145,6 +145,7 @@ async def explain_finding(analysis_id: str, request: ExplainRequest) -> ExplainR
         return await gemini_service.explain_finding(
             finding=finding,
             repo_name=analysis.repository,
+            user_prompt=request.prompt,
             fallback_on_error=False,
         )
     except AIServiceUnavailableError as exc:

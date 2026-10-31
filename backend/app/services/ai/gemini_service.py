@@ -55,6 +55,7 @@ class GeminiService:
         self,
         finding: FindingItem | FindingDetail,
         repo_name: str = "",
+        user_prompt: str | None = None,
         fallback_on_error: bool = False,
     ) -> ExplainResponse:
         """
@@ -64,13 +65,13 @@ class GeminiService:
         if not self.is_available():
             if fallback_on_error:
                 logger.info("Gemini not configured; returning deterministic fallback explanation.")
-                data = generate_deterministic_fallback(finding)
+                data = generate_deterministic_fallback(finding, user_prompt=user_prompt)
                 return ExplainResponse(**data)
             raise AIServiceUnavailableError(
                 "Gemini API key is not configured. The AI explanation service is currently unavailable."
             )
 
-        prompt = build_explanation_prompt(finding, repo_name)
+        prompt = build_explanation_prompt(finding, repo_name, user_prompt=user_prompt)
 
         try:
             from google.genai import types
@@ -90,22 +91,32 @@ class GeminiService:
                 raise ValueError("Received empty response from Gemini API.")
 
             # Attempt direct parse
+            parsed: dict[str, Any]
             try:
                 parsed = json.loads(raw_text)
-                return ExplainResponse(**parsed)
             except Exception:
                 # If markdown code block formatting was wrapped around JSON
                 match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
                 if match:
                     parsed = json.loads(match.group(1))
-                    return ExplainResponse(**parsed)
-                raise
+                else:
+                    raise
+
+            # Populate convenience aliases for frontend consumption
+            if "explanation" not in parsed and "summary" in parsed:
+                parsed["explanation"] = parsed["summary"]
+            if "potential_risks" not in parsed and "false_positive_scenarios" in parsed:
+                parsed["potential_risks"] = parsed["false_positive_scenarios"]
+            if "uncertainty_notes" not in parsed and "limitations" in parsed:
+                parsed["uncertainty_notes"] = parsed["limitations"]
+
+            return ExplainResponse(**parsed)
 
         except Exception as exc:
             logger.warning("Gemini generation failed for finding %s: %s", finding.finding_id, exc)
             if fallback_on_error:
                 logger.info("Returning deterministic fallback explanation due to error.")
-                return ExplainResponse(**generate_deterministic_fallback(finding))
+                return ExplainResponse(**generate_deterministic_fallback(finding, user_prompt=user_prompt))
             raise AIServiceUnavailableError(
                 f"Failed to generate AI explanation: {exc}"
             ) from exc

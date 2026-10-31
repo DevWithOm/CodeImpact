@@ -5,20 +5,6 @@ from typing import Any
 import uuid
 
 try:
-    from backend.app.adapters.base import (
-        DependencyImpactAdapterProtocol,
-        RepositoryAdapterProtocol,
-        StaticAnalysisAdapterProtocol,
-    )
-    from backend.app.adapters.dependency_impact_adapter import DependencyImpactAdapter
-    from backend.app.adapters.repository_adapter import RepositoryAdapter
-    from backend.app.adapters.static_analysis_adapter import StaticAnalysisAdapter
-    from backend.app.schemas.analysis import AnalysisRequest, AnalysisStatus
-    from backend.app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
-    from backend.app.schemas.finding import FindingItem
-    from backend.app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
-    from backend.app.services.analysis_store import AnalysisStore, analysis_store as default_store
-except ImportError:
     from app.adapters.base import (
         DependencyImpactAdapterProtocol,
         RepositoryAdapterProtocol,
@@ -32,6 +18,20 @@ except ImportError:
     from app.schemas.finding import FindingItem
     from app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
     from app.services.analysis_store import AnalysisStore, analysis_store as default_store
+except ImportError:
+    from backend.app.adapters.base import (
+        DependencyImpactAdapterProtocol,
+        RepositoryAdapterProtocol,
+        StaticAnalysisAdapterProtocol,
+    )
+    from backend.app.adapters.dependency_impact_adapter import DependencyImpactAdapter
+    from backend.app.adapters.repository_adapter import RepositoryAdapter
+    from backend.app.adapters.static_analysis_adapter import StaticAnalysisAdapter
+    from backend.app.schemas.analysis import AnalysisRequest, AnalysisStatus
+    from backend.app.schemas.evidence import EvidenceItem, FindingImpact, TestCandidate
+    from backend.app.schemas.finding import FindingItem
+    from backend.app.schemas.graph import GraphEdge, GraphNode, GraphResponse, GraphStats
+    from backend.app.services.analysis_store import AnalysisStore, analysis_store as default_store
 
 logger = logging.getLogger(__name__)
 
@@ -142,48 +142,78 @@ def normalize_finding_dict(item: dict[str, Any]) -> FindingItem:
         "direct_dependencies",
         "cycle_member",
         "cycles",
-        "self_dependency_detected",
-        "mapping_status",
-        "impact_status",
+        "module_type",
+        "is_entry_point",
+        "is_leaf",
+        "limitations",
     ):
         if k in item:
-            setattr(finding_item, k, item[k])
+            try:
+                setattr(finding_item, k, item[k])
+            except Exception:
+                pass
 
     return finding_item
 
 
-def normalize_graph_dict(analysis_id: str, raw_graph: dict[str, Any]) -> GraphResponse:
-    """Normalize graph structures from Phase 3 into standard GraphResponse."""
-    if "graph" in raw_graph and isinstance(raw_graph["graph"], dict):
-        raw_graph = raw_graph["graph"]
+def normalize_graph_dict(analysis_id: str, raw_graph: Any) -> GraphResponse:
+    """Normalize dependency graph from dependency impact engine into GraphResponse schema."""
+    if isinstance(raw_graph, GraphResponse):
+        return raw_graph
 
-    raw_nodes = raw_graph.get("nodes", [])
-    nodes = []
-    for n in raw_nodes:
-        if isinstance(n, dict):
-            nodes.append(GraphNode(**n))
-        elif isinstance(n, GraphNode):
+    if not isinstance(raw_graph, dict):
+        return GraphResponse(
+            analysis_id=analysis_id,
+            nodes=[],
+            edges=[],
+            cycles=[],
+            stats=GraphStats(node_count=0, edge_count=0, cycle_count=0),
+            truncated=False,
+        )
+
+    nodes: list[GraphNode] = []
+    for n in raw_graph.get("nodes", []):
+        if isinstance(n, GraphNode):
             nodes.append(n)
+        elif isinstance(n, dict):
+            nodes.append(
+                GraphNode(
+                    id=str(n.get("id", "")),
+                    label=str(n.get("label", n.get("id", ""))),
+                    file_path=str(n.get("file_path", n.get("id", ""))),
+                    incoming_count=int(n.get("incoming_count", 0)),
+                    outgoing_count=int(n.get("outgoing_count", 0)),
+                    in_cycle=bool(n.get("in_cycle", False)),
+                    is_entry_point=bool(n.get("is_entry_point", False)),
+                    review_risk=str(n.get("review_risk", "unknown")),
+                )
+            )
 
-    raw_edges = raw_graph.get("edges", [])
-    edges = []
-    for e in raw_edges:
-        if isinstance(e, dict):
-            edges.append(GraphEdge(**e))
-        elif isinstance(e, GraphEdge):
+    edges: list[GraphEdge] = []
+    for e in raw_graph.get("edges", []):
+        if isinstance(e, GraphEdge):
             edges.append(e)
+        elif isinstance(e, dict):
+            s = str(e.get("source", ""))
+            t = str(e.get("target", ""))
+            eid = str(e.get("id") or (f"{s}->{t}" if s and t else ""))
+            edges.append(
+                GraphEdge(
+                    id=eid,
+                    source=s,
+                    target=t,
+                    in_cycle=bool(e.get("in_cycle", False)),
+                    cycle_ids=e.get("cycle_ids", []),
+                )
+            )
 
-    cycles = raw_graph.get("cycles", [])
-
-    raw_stats = raw_graph.get("stats")
-    if isinstance(raw_stats, dict):
-        stats = GraphStats(**raw_stats)
-    elif isinstance(raw_stats, GraphStats):
-        stats = raw_stats
-    else:
-        stats = GraphStats(node_count=len(nodes), edge_count=len(edges), cycle_count=len(cycles))
-
-    truncated = bool(raw_graph.get("truncated", False))
+    cycles = list(raw_graph.get("cycles", []))
+    raw_stats = raw_graph.get("stats", {})
+    stats = GraphStats(
+        node_count=raw_stats.get("node_count", len(nodes)),
+        edge_count=raw_stats.get("edge_count", len(edges)),
+        cycle_count=raw_stats.get("cycle_count", len(cycles)),
+    )
 
     return GraphResponse(
         analysis_id=analysis_id,
@@ -191,7 +221,7 @@ def normalize_graph_dict(analysis_id: str, raw_graph: dict[str, Any]) -> GraphRe
         edges=edges,
         cycles=cycles,
         stats=stats,
-        truncated=truncated,
+        truncated=bool(raw_graph.get("truncated", False)),
     )
 
 
@@ -231,12 +261,21 @@ class AnalysisOrchestrator:
 
     async def run_pipeline(self, analysis_id: str) -> None:
         """Executes the analysis pipeline in the background."""
-        record_info = self.store.get_analysis(analysis_id)
-        if record_info is None:
-            logger.error("Cannot run pipeline: analysis %s not found in store", analysis_id)
-            return
+        record = self.store.get_record(analysis_id)
+        if record is None:
+            status_resp = self.store.get_analysis(analysis_id)
+            if status_resp is None:
+                logger.error("Cannot run pipeline: analysis %s not found in store", analysis_id)
+                return
+            repo_id = status_resp.repository
+            repo_url = repo_id if repo_id.startswith(("http://", "https://")) else f"https://github.com/{repo_id}"
+            branch = status_resp.branch
+        else:
+            repo_id = record.repository
+            repo_url = record.repository_url or (repo_id if repo_id.startswith(("http://", "https://")) else f"https://github.com/{repo_id}")
+            branch = record.branch
 
-        logger.info("Starting analysis pipeline for %s (%s)", analysis_id, record_info.repository)
+        logger.info("Starting analysis pipeline for %s (%s)", analysis_id, repo_id)
         self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="cloning")
 
         workspace_path = None
@@ -253,18 +292,20 @@ class AnalysisOrchestrator:
         )
 
         try:
-            # Stage 1: Repository Retrieval
+            # Stage 1: Repository Retrieval & Workspace Setup
             try:
-                retrieval = self.repo_adapter.retrieve_repository(
-                    repository_url=record_info.repository,
-                    branch=record_info.branch,
+                retrieval_res = self.repo_adapter.retrieve_repository(
+                    repository_url=repo_url,
+                    branch=branch,
                     analysis_id=analysis_id,
                 )
-                workspace_path = retrieval.get("workspace_path")
-                commit_sha = retrieval.get("commit_sha")
+                workspace_path = retrieval_res["workspace_path"]
+                commit_sha = retrieval_res.get("commit_sha")
                 tool_coverage["git"] = "success"
+                logger.info("Retrieved repository %s to workspace %s", repo_id, workspace_path)
             except Exception as exc:
-                logger.error("Repository retrieval failed for %s: %s", analysis_id, exc)
+                logger.exception("Repository retrieval failed for %s: %s", analysis_id, exc)
+                tool_coverage["git"] = "failed"
                 self.store.update_status(
                     analysis_id=analysis_id,
                     status=AnalysisStatus.FAILED,
@@ -273,29 +314,20 @@ class AnalysisOrchestrator:
                 )
                 return
 
-            if not workspace_path:
-                self.store.update_status(
-                    analysis_id=analysis_id,
-                    status=AnalysisStatus.FAILED,
-                    stage="failed",
-                    error_message="Repository retrieval returned an invalid workspace path.",
-                )
-                return
-
-            # Stage 2: Static Analysis (Knip, jscpd)
+            # Stage 2: Static Code Analysis (Knip, jscpd)
             self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="static_analysis")
             raw_findings = []
             try:
                 static_res = self.static_adapter.analyze_repository(workspace_path, analysis_id)
                 raw_findings = static_res.get("findings", [])
-                tool_coverage.update(static_res.get("tool_coverage", {"static_analysis": "success"}))
+                tool_coverage.update(static_res.get("tool_coverage", {}))
             except Exception as exc:
-                logger.warning("Static analysis failed for %s: %s", analysis_id, exc)
+                logger.warning("Static code analysis failed for %s: %s", analysis_id, exc)
                 tool_coverage["static_analysis"] = "failed"
 
-            # Stage 3: Dependency Graph & Impact (Madge, Cycle Detector, Impact, Test Mapper, Risk Scorer)
-            self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="dependency_graph")
-            raw_graph: dict[str, Any] = {}
+            # Stage 3: Dependency Graph Construction & Impact Analysis (Madge)
+            self.store.update_status(analysis_id, AnalysisStatus.RUNNING, stage="dependency_analysis")
+            raw_graph = {}
             try:
                 impact_res = self.dependency_adapter.analyze_impact(workspace_path, raw_findings, analysis_id)
                 raw_graph = impact_res.get("graph", {})

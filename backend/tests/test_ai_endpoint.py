@@ -28,6 +28,7 @@ def setup_test_analysis():
         source_tool="knip",
         description="No static imports of Button",
         review_risk="medium",
+        evidence=[],
     )
     analysis_store.update_results(
         "an_explain_test",
@@ -52,11 +53,30 @@ def test_explain_endpoint_unknown_finding():
     assert "f_nonexistent" in body["error"]["message"]
 
 
-def test_explain_endpoint_invalid_body():
+def test_explain_endpoint_missing_required_fields():
     res = client.post("/api/analyses/an_explain_test/explain", json={})
     assert res.status_code == 422
     body = res.json()
     assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "finding_id" in body["error"]["message"]
+
+
+def test_explain_endpoint_invalid_field_type():
+    res = client.post("/api/analyses/an_explain_test/explain", json={"finding_id": None})
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_explain_endpoint_extra_forbidden_fields_rejected():
+    res = client.post(
+        "/api/analyses/an_explain_test/explain",
+        json={"finding_id": "f_exp_1", "extra_unsupported_field": "disallowed"},
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert "extra_unsupported_field" in body["error"]["message"]
 
 
 def test_explain_endpoint_gemini_unavailable():
@@ -73,7 +93,7 @@ def test_explain_endpoint_gemini_unavailable():
         gemini_service._client = original_client
 
 
-def test_explain_endpoint_successful_generation():
+def test_explain_endpoint_successful_generation_without_prompt():
     mock_client = MagicMock()
     mock_response = MagicMock()
     mock_response.text = json.dumps({
@@ -96,5 +116,64 @@ def test_explain_endpoint_successful_generation():
         assert len(body["false_positive_scenarios"]) == 1
         assert len(body["verification_steps"]) == 1
         assert body["suggested_action"] == "Review before making a change."
+        # Verify convenience aliases populated
+        assert body["explanation"] == body["summary"]
+        assert body["potential_risks"] == body["false_positive_scenarios"]
+        assert body["uncertainty_notes"] == body["limitations"]
+    finally:
+        gemini_service._client = original_client
+
+
+def test_explain_endpoint_successful_generation_with_custom_prompt():
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "summary": "Button is safe to keep if used by external consumers.",
+        "why_it_matters": "Library export boundaries must be respected.",
+        "false_positive_scenarios": ["Consumed by consumer repositories."],
+        "verification_steps": ["Check npm package exports map."],
+        "suggested_action": "Verify public API before removal.",
+        "limitations": ["Static analysis only inspects internal files."]
+    })
+    mock_client.models.generate_content.return_value = mock_response
+
+    original_client = gemini_service._client
+    gemini_service._client = mock_client
+    try:
+        res = client.post(
+            "/api/analyses/an_explain_test/explain",
+            json={"finding_id": "f_exp_1", "prompt": "Can I delete Button.tsx safely?"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["summary"] == "Button is safe to keep if used by external consumers."
+        assert body["explanation"] == body["summary"]
+    finally:
+        gemini_service._client = original_client
+
+
+def test_explain_endpoint_repeated_requests_idempotent():
+    mock_client = MagicMock()
+    mock_response = MagicMock()
+    mock_response.text = json.dumps({
+        "summary": "Idempotent analysis test summary.",
+        "why_it_matters": "Test.",
+        "false_positive_scenarios": [],
+        "verification_steps": [],
+        "suggested_action": "Test action.",
+        "limitations": []
+    })
+    mock_client.models.generate_content.return_value = mock_response
+
+    original_client = gemini_service._client
+    gemini_service._client = mock_client
+    try:
+        for _ in range(3):
+            res = client.post(
+                "/api/analyses/an_explain_test/explain",
+                json={"finding_id": "f_exp_1", "prompt": "Repeated request check"},
+            )
+            assert res.status_code == 200
+            assert res.json()["summary"] == "Idempotent analysis test summary."
     finally:
         gemini_service._client = original_client

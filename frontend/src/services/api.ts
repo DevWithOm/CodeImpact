@@ -3,6 +3,8 @@ import { INITIAL_FINDINGS, GRAPH_NODES, GRAPH_EDGES, GRAPH_CYCLES, DEFAULT_SUMMA
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+const inFlightExplains = new Map<string, Promise<{ text: string; source: 'backend-gemini' | 'grounded-engine' }>>();
+
 function mapBackendCategory(cat: string): FindingCategory {
   const c = (cat || '').toLowerCase();
   if (c.includes('duplicate')) return 'Duplicate code';
@@ -283,316 +285,163 @@ export const api = {
     customPrompt?: string,
     analysisId = 'demo-analysis'
   ): Promise<{ text: string; source: 'backend-gemini' | 'grounded-engine' }> {
-    const q = (customPrompt || '').toLowerCase().trim();
+    const dedupKey = `${analysisId || ''}:${finding?.id || ''}:${customPrompt || ''}`;
+    if (inFlightExplains.has(dedupKey)) {
+      return inFlightExplains.get(dedupKey)!;
+    }
 
-    // 1. Attempt Backend API if available
-    try {
-      const res = await fetch(`${BASE_URL}/api/analyses/${analysisId}/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          finding_id: finding.id,
-          prompt: customPrompt
-        })
-      });
+    const runExplain = async (): Promise<{ text: string; source: 'backend-gemini' | 'grounded-engine' }> => {
+      const q = (customPrompt || '').toLowerCase().trim();
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.explanation) {
-          const formatted = `### AI Assessment: ${finding.title}
+      // 1. Attempt Backend API if available with valid analysis and finding IDs
+      const hasRealAnalysis = analysisId && analysisId !== 'demo-analysis' && analysisId.trim().length > 0;
+      if (hasRealAnalysis && finding?.id) {
+        try {
+          const payload: { finding_id: string; prompt?: string } = {
+            finding_id: finding.id
+          };
+          if (customPrompt && customPrompt.trim()) {
+            payload.prompt = customPrompt.trim();
+          }
 
-${data.explanation}
+          const res = await fetch(`${BASE_URL}/api/analyses/${encodeURIComponent(analysisId)}/explain`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
 
-**Potential Cleanup Risks:**
-${(data.potential_risks || []).map((r: string) => `- ${r}`).join('\n') || '- None documented.'}
+          if (res.ok) {
+            const data = await res.json();
+            const summaryText = data.summary || data.explanation;
+            if (summaryText) {
+              const whyItMatters = data.why_it_matters ? `\n\n**Why It Matters:**\n${data.why_it_matters}` : '';
+              const rawRisks = data.false_positive_scenarios || data.potential_risks || [];
+              const risksText = rawRisks.length > 0 ? `\n\n**Potential False Positive Scenarios / Risks:**\n${rawRisks.map((r: string) => `- ${r}`).join('\n')}` : '';
+              const rawSteps = data.verification_steps || [];
+              const stepsText = rawSteps.length > 0 ? `\n\n**Verification Steps:**\n${rawSteps.map((v: string, i: number) => `${i + 1}. ${v}`).join('\n')}` : '';
+              const actionText = data.suggested_action ? `\n\n**Suggested Action:**\n${data.suggested_action}` : '';
+              const rawLimits = (data.limitations || data.uncertainty_notes || []).join(' ');
+              const limitsText = rawLimits ? `\n\n> [!CAUTION]\n> **Limitations**: ${rawLimits}` : '';
 
-**Verification Steps:**
-${(data.verification_steps || []).map((v: string, i: number) => `${i + 1}. ${v}`).join('\n') || '1. Run test suite.\n2. Check call sites.'}
-
-> [!CAUTION]
-> **Limitations**: ${(data.uncertainty_notes || []).join(' ') || 'Static analysis cannot prove dynamic runtime reachability.'}`;
-          return { text: formatted, source: 'backend-gemini' };
+              const formatted = `### AI Assessment: ${finding.title}\n\n${summaryText}${whyItMatters}${risksText}${stepsText}${actionText}${limitsText}`;
+              return { text: formatted, source: 'backend-gemini' as const };
+            }
+          } else if (res.status === 422) {
+            const errData = await res.json().catch(() => ({}));
+            console.warn('[CodeImpact API] Explanation validation error (422):', errData);
+          }
+        } catch (fetchErr) {
+          console.warn('[CodeImpact API] Explain endpoint network error, using grounded engine:', fetchErr);
         }
       }
-    } catch {
-      // Fall back gracefully to grounded client-side engine
-    }
 
-    // 2. Grounded Client-Side Engine Fallback (Deterministic, Evidence-First)
-    const fileName = finding.file.split('/').pop() || finding.file;
-    const incomingCount = finding.dependencyContext.incoming;
-    const outgoingCount = finding.dependencyContext.outgoing;
-    const affectedModules = finding.dependencyContext.affectedModules;
-    const tests = finding.testImpactContext?.testFiles || finding.dependencyContext.affectedTests;
+      // 2. Grounded Client-Side Engine Fallback (Deterministic, Evidence-First)
+      const fileName = finding.file.split('/').pop() || finding.file;
+      const incomingCount = finding.dependencyContext.incoming;
+      const outgoingCount = finding.dependencyContext.outgoing;
+      const affectedModules = finding.dependencyContext.affectedModules;
+      const tests = finding.testImpactContext?.testFiles || finding.dependencyContext.affectedTests;
 
-    // A. "Is it safe to delete?"
-    if (q.includes('safe to delete') || q.includes('can i delete') || q.includes('remove safely')) {
-      const isLowFanIn = incomingCount === 0;
-      return {
-        source: 'grounded-engine',
-        text: `### ⚠️ Safety Assessment for \`${fileName}\`
-
-**Verdict**: **No static analysis tool can unconditionally guarantee that code is safe to delete.**
-
-#### 1. Available Evidence
-- **Analyzer**: ${finding.analyzer} (Confidence: **${finding.confidence}%**)
-- **Category**: ${finding.category}
-- **Incoming Dependencies**: ${incomingCount} static references detected.
-- **Outgoing Dependencies**: ${outgoingCount} modules imported.
-
-#### 2. Risk & Blast Radius
-${
-  isLowFanIn
-    ? `- **Static Fan-in**: 0 compiled imports found. The file appears to be unreferenced in the main module tree.`
-    : `- **Warning**: ${incomingCount} files directly import this module (${affectedModules.slice(0, 3).join(', ')}). Deleting it will trigger immediate compilation failures.`
-}
-- **Impact Risk Score**: **${finding.impactScore}/100** (${finding.impactRisk}).
-
-#### 3. Runtime & Dynamic Uncertainty (Blind Spots)
-- **Reflection / Dynamic Imports**: Calls like \`import(\`./${fileName}\`)\` or string-keyed lookups evade AST scanners.
-- **Public API Surface**: If this repository is a package or library, downstream consumers may import this file externally.
-- **Framework Magic**: Next.js route handlers, Vite glob imports, and test runners load files without explicit static imports.
-
-#### 4. Recommended Verification Checklist
-${finding.verificationSteps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}
-
-> [!CAUTION]
-> **Verification Step Required**: Run full integration tests (\`${tests[0] || 'npm test'}\`) before deleting this file.`
-      };
-    }
-
-    // B. "Why was this code flagged?" / "What evidence supports this finding?"
-    if (
-      q.includes('why was this') ||
-      q.includes('why flagged') ||
-      q.includes('evidence') ||
-      q.includes('supports this')
-    ) {
-      return {
-        source: 'grounded-engine',
-        text: `### 🔬 Analyzer Evidence Breakdown: \`${finding.title}\`
-
-#### 1. Detection Mechanism
-- **Analyzer Engine**: **${finding.analyzer}**
-- **Confidence Rating**: **${finding.confidence}%** (High deterministic match)
-- **Target File**: \`${finding.file}\` (${finding.lines})
-
-#### 2. Why It Was Flagged
-${finding.description}
-
-#### 3. Relevant Code Segment
-\`\`\`typescript
-${finding.codeSnippet}
-\`\`\`
-
-#### 4. Supporting Context
-- **Static In-degree**: ${incomingCount} incoming callers.
-- **Static Out-degree**: ${outgoingCount} external imports.
-${
-  finding.category === 'Circular dependencies'
-    ? '- **Cycle Details**: Mutual import cycle detected by AST graph traversal. Causes indeterminate initialization order and undefined binding risks at boot.'
-    : ''
-}
-${
-  finding.category === 'Duplicate code'
-    ? '- **Clone Type**: Syntactically identical AST subtrees identified across multiple components.'
-    : ''
-}
-
-#### 5. Analyzer Limitations
-- AST parsers analyze written source text, not runtime memory states.
-- Dynamic expressions, DI containers, and runtime event listeners cannot be validated without running test suites.`
-      };
-    }
-
-    // C. "What could break if I remove this code?"
-    if (
-      q.includes('what could break') ||
-      q.includes('break if') ||
-      q.includes('blast radius') ||
-      q.includes('impact')
-    ) {
-      return {
-        source: 'grounded-engine',
-        text: `### 💥 Blast Radius & Potential Impact for \`${fileName}\`
-
-#### 1. Downstream Module Blast Radius
-- **Incoming Callers**: **${incomingCount}** direct dependent module(s).
-${
-  affectedModules.length > 0
-    ? `Directly affected files:\n${affectedModules.map((m) => `  - \`${m}\``).join('\n')}`
-    : '  - *No compile-time incoming callers detected.*'
-}
-
-#### 2. Test Suite Impact
-- **Mapped Tests**: **${tests.length}** test suite(s) touch this symbol.
-${
-  tests.length > 0
-    ? `${tests.map((t) => `  - \`${t}\``).join('\n')}\n\n**Why Affected**: ${finding.testImpactContext?.whyAffected || 'Tests verify assertions against this symbol.'}`
-    : '  - *No direct test suites specifically mapped. Manual regression testing strongly recommended.*'
-}
-
-#### 3. Runtime Failure Modes
-- If any external consumer or dynamic loader relies on \`${fileName}\`, removing it will produce:
-  - \`ModuleNotFoundError: Cannot find module '${finding.file}'\`
-  - \`TypeError: (0 , _auth.useUser) is not a function\` during runtime initialization.
-
-#### 4. Safety Guardrails
-1. Stash changes on a separate branch before removing.
-2. Run test suite: \`${tests.length > 0 ? tests.join(' ') : 'npm test'}\`.
-3. Check Git blame to identify when and why this module was introduced.`
-      };
-    }
-
-    // D. "Which modules depend on this file?"
-    if (
-      q.includes('which modules depend') ||
-      q.includes('depend on this') ||
-      q.includes('callers') ||
-      q.includes('fan-in')
-    ) {
-      return {
-        source: 'grounded-engine',
-        text: `### 🔗 Dependency Fan-In for \`${fileName}\`
-
-- **Total Inbound Dependencies**: **${incomingCount}**
-- **Total Outbound Dependencies**: **${outgoingCount}**
-
-#### Inbound Callers (Modules importing \`${fileName}\`):
-${
-  affectedModules.length > 0
-    ? affectedModules.map((m) => `- \`${m}\` — requires exports from this file`).join('\n')
-    : `- *Zero incoming compile-time dependencies.* Neither \`import\` nor \`require\` was found referencing this file in the workspace.`
-}
-
-#### Outbound Dependencies (Modules imported by \`${fileName}\`):
-${
-  outgoingCount > 0
-    ? `- This file imports **${outgoingCount}** upstream modules (see Dependency Graph tab for connection nodes).`
-    : `- This file is a leaf module with zero outgoing internal imports.`
-}
-
-> [!TIP]
-> You can inspect these connections visually by clicking **"View in Graph"** in the sidebar.`
-      };
-    }
-
-    // E. "Which tests should I run before changing it?"
-    if (
-      q.includes('test') ||
-      q.includes('tests') ||
-      q.includes('run before')
-    ) {
-      return {
-        source: 'grounded-engine',
-        text: `### 🧪 Test Suite Impact for \`${fileName}\`
-
-#### 1. Mapped Test Suites (${tests.length})
-${
-  tests.length > 0
-    ? tests.map((t) => `- \`${t}\``).join('\n')
-    : '- *No direct unit tests found explicitly referencing this file.*'
-}
-
-#### 2. Why Tests Are Impacted
-${finding.testImpactContext?.whyAffected || 'Tests verify assertions and mock behavior against exports from this module.'}
-
-#### 3. Recommended Test Commands
-\`\`\`bash
-# Run targeted test suites
-${tests.length > 0 ? `npm test -- ${tests[0]}` : 'npm test'}
-
-# Run full project regression suite
-npm run test:all
-\`\`\`
-
-#### 4. Missing Test Coverage Notice
-${
-  tests.length === 0
-    ? '⚠️ **Test Gap Warning**: Since no dedicated unit tests cover this file, code removal relies entirely on integration tests and manual smoke testing.'
-    : '✓ Automated tests exist to guard against unintentional interface regressions.'
-}`
-      };
-    }
-
-    // F. "Is this finding reliable or could it be a false positive?"
-    if (
-      q.includes('reliable') ||
-      q.includes('false positive') ||
-      q.includes('accuracy') ||
-      q.includes('confidence')
-    ) {
-      return {
-        source: 'grounded-engine',
-        text: `### 🎯 Reliability & False Positive Analysis: \`${finding.id}\`
-
-- **Confidence Score**: **${finding.confidence}%** (${finding.confidence >= 90 ? 'High confidence AST match' : 'Moderate confidence heuristics'})
-- **Analyzer**: **${finding.analyzer}**
-- **Review Status**: **${finding.reviewStatus}**
-
-#### Potential False Positive Factors:
-1. **Dynamic symbol dispatch**: If this symbol is looked up via dictionary indexing or \`eval\`, static scanners will report it as unused even though it runs in production.
-2. **External consumers**: If this project is published as an npm package, exported symbols may be consumed outside this codebase.
-3. **Implicit framework routing**: Next.js pages, Gatsby templates, or Astro endpoints are loaded by framework file-system routers rather than code \`import\` statements.
-
-#### Decision Recommendation:
-- If this is an internal private component and tests pass, it is likely a **true positive candidate for refactoring**.
-- If this symbol belongs to a public SDK or plugin boundary, mark status as **"False Positive (Keep)"** in the Findings Explorer.`
-      };
-    }
-
-    // G. "Explain this finding in simple terms"
-    if (q.includes('simple terms') || q.includes('eli5') || q.includes('plain english') || q.includes('explain')) {
-      return {
-        source: 'grounded-engine',
-        text: `### 💡 Plain English Summary: \`${fileName}\`
-
-- **The Problem**: CodeImpact's **${finding.analyzer}** noticed that \`${fileName}\` ${
-        finding.category === 'Potentially unused code'
-          ? 'contains code that nothing else in the project seems to be importing or calling.'
-          : finding.category === 'Circular dependencies'
-          ? 'and another file import each other in a loop, which can cause subtle crashes when the app starts.'
-          : finding.category === 'Duplicate code'
-          ? 'contains a chunk of code that is almost identical to code in another file.'
-          : finding.category === 'High-risk hotspots'
-          ? 'is a heavily modified, central file that many other files depend on. Changing it carries high risk.'
-          : 'has been flagged for engineering review.'
+      // A. "Is it safe to delete?"
+      if (q.includes('safe to delete') || q.includes('can i delete') || q.includes('remove safely')) {
+        const isLowFanIn = incomingCount === 0;
+        return {
+          source: 'grounded-engine' as const,
+          text: `### ⚠️ Safety Assessment for \`${fileName}\`\n\n**Verdict**: **No static analysis tool can unconditionally guarantee that code is safe to delete.**\n\n#### 1. Available Evidence\n- **Analyzer**: ${finding.analyzer} (Confidence: **${finding.confidence}%**)\n- **Category**: ${finding.category}\n- **Incoming Dependencies**: ${incomingCount} static references detected.\n- **Outgoing Imports**: ${outgoingCount} modules imported.\n- **Associated Tests**: ${tests.length > 0 ? tests.join(', ') : 'None mapped directly.'}\n\n#### 2. Risk Indicators\n${
+            isLowFanIn
+              ? '- **Low Static Fan-In**: No other tracked files directly import this file in the static AST scan.\n- **Blind Spot Warning**: Framework routing (Next.js/React Router), dynamic `import()`, or Webpack chunk configurations might invoke this component dynamically at runtime.'
+              : `- **Active Dependants Detected**: Flagged code has **${incomingCount} incoming callers** (${affectedModules.slice(0, 3).join(', ')}${affectedModules.length > 3 ? '...' : ''}). Deleting it will cause compiler/runtime crashes.`
+          }\n\n#### 3. Recommended Verification Steps\n1. Search for dynamic references or string keys (e.g. \`React.lazy(() => import(...))\`).\n2. Run automated test suites: ${tests.length > 0 ? `\`${tests.join(', ')}\`` : 'No direct unit tests detected; run full regression test suite.'}\n3. If this is a library package, check whether this export is part of the public interface before refactoring.`
+        };
       }
 
-- **Why You Should Care**:
-  - Leaving dead code around bloats your bundle and confuses new developers.
-  - But deleting it recklessly can break things if it is secretly loaded in background scripts.
+      // B. "What could break if I remove this code?"
+      if (q.includes('what could break') || q.includes('break') || q.includes('impact') || q.includes('consequences')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 💥 Blast Radius & Impact Analysis: \`${fileName}\`\n\n- **Finding ID**: \`${finding.id}\`\n- **Direct Callers**: **${incomingCount}** modules depend on this file.\n- **Downstream Consumers**: ${
+            affectedModules.length > 0
+              ? affectedModules.map((m) => `\`${m}\``).join(', ')
+              : 'None detected via static import analysis.'
+          }\n- **Impact Risk Rating**: **${finding.impactRisk}** (${finding.impactScore}/100)\n\n#### Potential Runtime Failures\n- **Import Resolution Errors**: If any consumer attempts to import this module, bundling or execution will fail with \`Cannot find module\` or \`Module not found\`.\n- **Export Reference Breakage**: If exported functions are expected by third-party packages, external consumers will encounter runtime crashes.\n\n#### Mandatory Pre-Removal Checklist\n1. Deprecate the symbol first (mark with \`@deprecated\`) before outright deletion.\n2. Run regression tests in all downstream caller modules: ${affectedModules.slice(0, 4).join(', ') || 'N/A'}.`
+        };
+      }
 
-- **What You Should Do Next**:
-  1. Don't delete it immediately.
-  2. Check if any tests use it (\`${tests[0] || 'npm test'}\`).
-  3. Verify whether it is part of a public API before removing.`
+      // C. "Why was this code flagged?"
+      if (q.includes('why was this') || q.includes('flagged') || q.includes('reason') || q.includes('why is this')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 🔬 Static Analysis Audit Trail: \`${fileName}\`\n\n- **Reporting Tool**: **${finding.analyzer}**\n- **Finding Category**: **${finding.category}**\n- **Confidence**: **${finding.confidence}%**\n- **Location**: \`${finding.file}\` (${finding.lines})\n\n#### Detection Evidence\n${finding.description}\n\n\`\`\`typescript\n${finding.codeSnippet}\n\`\`\`\n\n#### Analysis Invariants\n- CodeImpact detected **0 direct static imports** referencing this symbol during the AST scan.\n- This finding represents an *absence of static evidence*, not a guarantee of non-usage.`
+        };
+      }
+
+      // D. "Which tests should I run?"
+      if (q.includes('test') || q.includes('tests') || q.includes('spec') || q.includes('suite')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 🧪 Test Impact Mapping: \`${fileName}\`\n\n- **Directly Associated Tests**: ${tests.length > 0 ? tests.map((t) => `\`${t}\``).join(', ') : '**No direct unit tests mapped.**'}\n- **Test Impact Context**: ${finding.testImpactContext?.whyAffected || 'Derived from topological dependency analysis.'}\n\n#### Recommended Test Plan\n${
+            tests.length > 0
+              ? tests.map((t, i) => `${i + 1}. Run \`npm test -- ${t}\``).join('\n')
+              : '1. No tests import this file directly. Write a regression smoke test before altering this module.'
+          }\n2. Run end-to-end integration tests to verify runtime paths.`
+        };
+      }
+
+      // E. "Which modules depend on this file?"
+      if (q.includes('depend') || q.includes('callers') || q.includes('consumers') || q.includes('modules')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 🔗 Dependency Fan-In & Fan-Out: \`${fileName}\`\n\n- **Incoming Callers (${incomingCount})**: ${
+            affectedModules.length > 0
+              ? affectedModules.map((m) => `\`${m}\``).join(', ')
+              : 'None detected.'
+          }\n- **Outgoing Imports (${outgoingCount})**: This file imports **${outgoingCount}** other modules in the codebase.\n- **Circular Cycle Risk**: ${
+            finding.category === 'Circular dependencies'
+              ? '⚠️ **Active member of a circular dependency cycle.**'
+              : 'No circular cycles detected for this module.'
+          }`
+        };
+      }
+
+      // F. "Is this finding reliable or a false positive?"
+      if (q.includes('false positive') || q.includes('reliable') || q.includes('accuracy') || q.includes('confidence')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 🎯 Reliability & False-Positive Analysis: \`${fileName}\`\n\n- **Confidence Score**: **${finding.confidence}%**\n- **Primary Evidence**: ${finding.description}\n\n#### Common False-Positive Scenarios for this Finding\n1. **Dynamic Reflection**: Code invoked via \`require(variable)\` or \`window[symbol]\` cannot be traced statically.\n2. **Plugin Registration**: Files automatically registered by Vite/Webpack glob loaders (e.g. \`import.meta.glob\`).\n3. **External Consumer API**: If this repository is an npm package or SDK, exports are consumed externally.\n\n#### Action\n- If this symbol belongs to a public SDK or plugin boundary, mark status as **"False Positive (Keep)"** in the Findings Explorer.`
+        };
+      }
+
+      // G. "Explain this finding in simple terms"
+      if (q.includes('simple terms') || q.includes('eli5') || q.includes('plain english') || q.includes('explain')) {
+        return {
+          source: 'grounded-engine' as const,
+          text: `### 💡 Plain English Summary: \`${fileName}\`\n\n- **The Problem**: CodeImpact's **${finding.analyzer}** noticed that \`${fileName}\` ${
+            finding.category === 'Potentially unused code'
+              ? 'contains code that nothing else in the project seems to be importing or calling.'
+              : finding.category === 'Circular dependencies'
+              ? 'and another file import each other in a loop, which can cause subtle crashes when the app starts.'
+              : finding.category === 'Duplicate code'
+              ? 'contains a chunk of code that is almost identical to code in another file.'
+              : finding.category === 'High-risk hotspots'
+              ? 'is a heavily modified, central file that many other files depend on. Changing it carries high risk.'
+              : 'has been flagged for engineering review.'
+          }\n\n- **Why You Should Care**:\n  - Leaving dead code around bloats your bundle and confuses new developers.\n  - But deleting it recklessly can break things if it is secretly loaded in background scripts.\n\n- **What You Should Do Next**:\n  1. Don't delete it immediately.\n  2. Check if any tests use it (\`${tests[0] || 'npm test'}\`).\n  3. Verify whether it is part of a public API before removing.`
+        };
+      }
+
+      // H. Default comprehensive context reply
+      return {
+        source: 'grounded-engine' as const,
+        text: `### 📋 Contextual Assessment for \`${fileName}\` (${finding.lines})\n\n- **Analyzer**: Flagged by **${finding.analyzer}** with **${finding.confidence}%** confidence.\n- **Finding Type**: ${finding.category}\n- **Description**: ${finding.description}\n- **Impact Risk**: **${finding.impactRisk}** (${finding.impactScore}/100)\n- **Dependency Topology**: ${incomingCount} incoming callers, ${outgoingCount} outgoing imports.\n- **Mapped Tests**: ${tests.length > 0 ? tests.join(', ') : 'None mapped (requires regression verification)'}.\n\n#### Verification Steps:\n${finding.verificationSteps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}\n\n> [!NOTE]\n> **Runtime Caveat**: ${finding.runtimeCaveat || 'Static analysis does not guarantee runtime reachability.'}`
       };
-    }
-
-    // H. Default comprehensive context reply
-    return {
-      source: 'grounded-engine',
-      text: `### 📋 Contextual Assessment for \`${fileName}\` (${finding.lines})
-
-- **Analyzer**: Flagged by **${finding.analyzer}** with **${finding.confidence}%** confidence.
-- **Finding Type**: ${finding.category}
-- **Description**: ${finding.description}
-- **Impact Risk**: **${finding.impactRisk}** (Score: ${finding.impactScore}/100)
-- **Dependency Topology**: ${incomingCount} incoming callers, ${outgoingCount} outgoing imports.
-- **Mapped Tests**: ${tests.length > 0 ? tests.join(', ') : 'None mapped (requires regression verification)'}.
-
-#### Verification Steps:
-${finding.verificationSteps.map((step, idx) => `${idx + 1}. ${step}`).join('\n')}
-
-> [!NOTE]
-> **Runtime Caveat**: ${finding.runtimeCaveat || 'Static analysis does not guarantee runtime reachability.'}`
     };
-  },
 
-  /**
-   * Triggers client-side browser file download.
-   */
+    const promise = runExplain().finally(() => {
+      inFlightExplains.delete(dedupKey);
+    });
+    inFlightExplains.set(dedupKey, promise);
+    return promise;
+  },
   downloadFile(content: string, filename: string, mimeType: string): void {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);

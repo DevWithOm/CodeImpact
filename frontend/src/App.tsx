@@ -140,7 +140,7 @@ export default function App() {
 
   // AI Chat Handler
   const handleAiAsk = async (promptText: string) => {
-    if (!promptText.trim()) return;
+    if (!promptText.trim() || isAiTyping) return;
 
     const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
