@@ -1,7 +1,7 @@
 """GitHub repository retrieval service.
 
 Handles public GitHub HTTPS URL validation, shallow cloning, branch resolution,
-commit SHA extraction, size/timeout restrictions, and file discovery.
+commit SHA extraction, size/timeout restrictions, file filtering, and workspace management.
 """
 
 import logging
@@ -16,18 +16,19 @@ from backend.app.utils.subprocess_runner import run_command
 
 logger = logging.getLogger(__name__)
 
-# Strict regex for public GitHub HTTPS URLs
+# Strict regex for public GitHub HTTPS URLs only
 GITHUB_HTTPS_REGEX = re.compile(
     r"^https://github\.com/(?P<owner>[a-zA-Z0-9_.-]+)/(?P<repo>[a-zA-Z0-9_.-]+?)(?:\.git)?/?$"
 )
 
 # Restrictions
 MAX_REPO_SIZE_MB = 200.0
+MAX_FILE_COUNT = 10000
 CLONE_TIMEOUT_SECONDS = 180
 
 
 class RepositoryRetrievalError(Exception):
-    """Raised when repository retrieval fails validation or execution."""
+    """Raised when repository retrieval fails validation, security checks, or execution."""
     pass
 
 
@@ -38,12 +39,19 @@ def validate_github_url(url: str) -> tuple[str, str, str]:
         tuple of (normalized_url, owner, repo_name)
 
     Raises:
-        RepositoryRetrievalError if URL format is invalid or insecure.
+        RepositoryRetrievalError if URL format is invalid, uses an unsupported host, or is insecure.
     """
     if not url or not isinstance(url, str):
         raise RepositoryRetrievalError("Repository URL must be a non-empty string.")
 
     cleaned_url = url.strip()
+
+    # Reject non-GitHub hosts explicitly with clear messages
+    if "gitlab.com" in cleaned_url or "bitbucket.org" in cleaned_url or "sourceforge.net" in cleaned_url:
+        raise RepositoryRetrievalError(
+            f"Unsupported host in URL '{cleaned_url}'. Only public GitHub repositories are supported."
+        )
+
     match = GITHUB_HTTPS_REGEX.match(cleaned_url)
     if not match:
         raise RepositoryRetrievalError(
@@ -54,12 +62,25 @@ def validate_github_url(url: str) -> tuple[str, str, str]:
     owner = match.group("owner")
     repo = match.group("repo")
 
-    # Extra defense against path traversal or malicious symbols in names
+    # Defense against path traversal or malicious symbols in names
     if ".." in owner or ".." in repo:
         raise RepositoryRetrievalError("Invalid repository URL: path traversal detected.")
 
     normalized_url = f"https://github.com/{owner}/{repo}.git"
     return normalized_url, owner, repo
+
+
+def validate_branch_name(branch: str | None) -> str | None:
+    """Validates git branch name to prevent flag injection or shell tampering."""
+    if not branch or not branch.strip():
+        return None
+
+    clean_branch = branch.strip()
+    # Reject flag injection, command chaining characters, or whitespace
+    if clean_branch.startswith("-") or ";" in clean_branch or " " in clean_branch or "&" in clean_branch or "|" in clean_branch:
+        raise RepositoryRetrievalError(f"Invalid branch name: '{clean_branch}'.")
+
+    return clean_branch
 
 
 def retrieve_repository(
@@ -71,24 +92,25 @@ def retrieve_repository(
 
     Args:
         repository_url: Public HTTPS GitHub URL.
-        branch: Optional branch name to checkout.
+        branch: Optional branch name to checkout. If None, default branch is cloned.
         analysis_id: Optional unique analysis identifier.
 
     Returns:
-        Dict conforming to the agreed retrieval contract:
+        Dict conforming to the Phase 1 retrieval contract:
         {
-            "workspace_path": str,
-            "repository": "owner/repo",
-            "branch": str,
-            "commit_sha": str,
-            "file_count": int,
-            "languages": list[str],
+            "workspace_path": "/tmp/codeimpact/an_001",
+            "repository": "owner/repository",
+            "branch": "main",
+            "commit_sha": "abc123",
+            "file_count": 120,
+            "total_file_count": 150,
+            "languages": ["JavaScript", "TypeScript"],
             "status": "retrieved",
-            "warnings": list[str]
+            "warnings": []
         }
 
     Raises:
-        RepositoryRetrievalError on validation or git failure.
+        RepositoryRetrievalError on validation, security violations, or git clone failures.
     """
     warnings: list[str] = []
 
@@ -96,17 +118,16 @@ def retrieve_repository(
     normalized_url, owner, repo_name = validate_github_url(repository_url)
     full_repo_id = f"{owner}/{repo_name}"
 
-    # 2. Workspace Creation
+    # 2. Branch Validation
+    valid_branch = validate_branch_name(branch)
+
+    # 3. Workspace Creation
     aid, workspace_path = create_workspace(analysis_id)
 
-    # 3. Clone execution using shallow clone (--depth 1)
+    # 4. Clone execution using shallow clone (--depth 1)
     clone_cmd = ["git", "clone", "--depth", "1"]
-    if branch and branch.strip():
-        # Validate branch name to prevent flag injection
-        clean_branch = branch.strip()
-        if clean_branch.startswith("-") or ";" in clean_branch or " " in clean_branch:
-            raise RepositoryRetrievalError(f"Invalid branch name: '{clean_branch}'.")
-        clone_cmd.extend(["--branch", clean_branch])
+    if valid_branch:
+        clone_cmd.extend(["--branch", valid_branch])
 
     clone_cmd.extend([normalized_url, workspace_path])
 
@@ -117,7 +138,6 @@ def retrieve_repository(
     )
 
     if not clone_result.succeeded:
-        # If specific branch was requested and failed, fail clearly
         error_msg = clone_result.stderr.strip() or clone_result.stdout.strip()
         raise RepositoryRetrievalError(
             f"Failed to retrieve repository '{full_repo_id}'"
@@ -125,7 +145,7 @@ def retrieve_repository(
             + f": {error_msg}"
         )
 
-    # 4. Extract Commit SHA
+    # 5. Extract Commit SHA
     sha_result = run_command(
         ["git", "rev-parse", "HEAD"],
         cwd=workspace_path,
@@ -133,23 +153,28 @@ def retrieve_repository(
     )
     commit_sha = sha_result.stdout.strip() if sha_result.succeeded else "unknown"
 
-    # 5. Extract actual resolved branch name
+    # 6. Extract actual resolved branch name
     branch_result = run_command(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"],
         cwd=workspace_path,
         timeout=10,
     )
-    resolved_branch = branch_result.stdout.strip() if branch_result.succeeded else (branch or "HEAD")
+    resolved_branch = branch_result.stdout.strip() if branch_result.succeeded else (valid_branch or "HEAD")
 
-    # 6. Verify repository size restriction
+    # 7. Verify repository size restriction
     size_mb = get_directory_size_mb(workspace_path)
     if size_mb > MAX_REPO_SIZE_MB:
         raise RepositoryRetrievalError(
             f"Repository exceeds maximum allowed size ({size_mb} MB > {MAX_REPO_SIZE_MB} MB limit)."
         )
 
-    # 7. Scan repository files and detect languages
-    file_scan = scan_repository_files(workspace_path)
+    # 8. Scan repository files and detect languages
+    file_scan = scan_repository_files(workspace_path, max_files=MAX_FILE_COUNT)
+    if file_scan["total_file_count"] > MAX_FILE_COUNT:
+        raise RepositoryRetrievalError(
+            f"Repository exceeds maximum allowed file count ({file_scan['total_file_count']} > {MAX_FILE_COUNT} files limit)."
+        )
+
     if not file_scan["has_package_json"]:
         warnings.append("No root package.json found. Analysis may be limited or skipped.")
 
