@@ -9,13 +9,16 @@ from typing import Any
 from backend.app.schemas.analysis import ToolCoverageItem
 from backend.app.schemas.finding import Finding
 from backend.app.services.static_analysis.normalizer import normalize_knip_findings
-from backend.app.utils.file_utils import scan_repository_files
-from backend.app.utils.subprocess_runner import run_command
+from backend.app.utils.file_utils import is_safe_path, scan_repository_files
+from backend.app.utils.subprocess_runner import redact_secrets, run_command
 
 
 logger = logging.getLogger(__name__)
 
 KNIP_TIMEOUT_SECONDS = 180
+
+EXECUTABLE_CONFIG_NAMES = ["knip.ts", "knip.js", "knip.mjs", "knip.cjs"]
+SAFE_DECLARATIVE_CONFIG_NAMES = ["knip.json", "knip.jsonc"]
 
 
 def _find_knip_executable() -> str:
@@ -111,6 +114,27 @@ def run_knip_analysis(
             message="Repository lacks root package.json. Knip requires package.json for project configuration.",
         )
 
+    # Security check: verify reports directory and reject symlink escape attempts
+    codeimpact_dir = repo_path_obj / ".codeimpact"
+    reports_dir = Path(output_dir) if output_dir else (codeimpact_dir / "reports")
+
+    if codeimpact_dir.is_symlink() or reports_dir.is_symlink():
+        return [], ToolCoverageItem(
+            status="failed",
+            finding_count=0,
+            message="Security violation: .codeimpact directory or report path is an untrusted symbolic link.",
+        )
+
+    if not is_safe_path(str(repo_path_obj), str(reports_dir)):
+        return [], ToolCoverageItem(
+            status="failed",
+            finding_count=0,
+            message="Security violation: report output path escapes the repository workspace.",
+        )
+
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    report_file = reports_dir / "knip.json"
+
     knip_bin = _find_knip_executable()
     if knip_bin == "knip" and not Path("tooling/node_modules/knip").exists():
         return [], ToolCoverageItem(
@@ -119,12 +143,10 @@ def run_knip_analysis(
             message="Knip executable not found in tooling/node_modules. Run npm install in tooling.",
         )
 
-    # Prepare reports output directory
-    reports_dir = Path(output_dir) if output_dir else (repo_path_obj / ".codeimpact" / "reports")
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    report_file = reports_dir / "knip.json"
+    # Security policy: Check for executable repository configuration (knip.js, knip.ts)
+    has_executable_config = any((repo_path_obj / cfg).exists() for cfg in EXECUTABLE_CONFIG_NAMES)
+    declarative_config = next((cfg for cfg in SAFE_DECLARATIVE_CONFIG_NAMES if (repo_path_obj / cfg).exists()), None)
 
-    # Command runs with cwd=repo_path_obj
     cmd = [
         "node",
         knip_bin,
@@ -133,6 +155,19 @@ def run_knip_analysis(
         "--no-progress",
         "--no-exit-code",
     ]
+
+    coverage_message = None
+    coverage_status = "completed"
+
+    if has_executable_config:
+        if declarative_config:
+            # Force Knip to use the safe declarative JSON config instead of executing JS/TS
+            cmd.extend(["--config", declarative_config])
+            coverage_message = f"Executable Knip configuration in repository was bypassed in favor of safe '{declarative_config}'."
+        else:
+            # Skip executable config file by directing Knip away from it
+            coverage_status = "partial"
+            coverage_message = "Executable Knip configuration (knip.js/knip.ts) was excluded to prevent arbitrary code execution; default entrypoints used."
 
     # Resolve node_modules path for Knip dependencies
     tooling_dir = Path(knip_bin).parents[3]
@@ -161,13 +196,13 @@ def run_knip_analysis(
             return [], ToolCoverageItem(
                 status="failed",
                 finding_count=0,
-                message=f"Knip failed with exit code {result.exit_code}: {error_msg[:300]}",
+                message=f"Knip failed with exit code {result.exit_code}: {redact_secrets(error_msg[:300])}",
             )
         if raw_stdout:
             return [], ToolCoverageItem(
                 status="failed",
                 finding_count=0,
-                message=f"Failed to parse Knip JSON output: {raw_stdout[:300]}",
+                message=f"Failed to parse Knip JSON output: {redact_secrets(raw_stdout[:300])}",
             )
         raw_data = {"files": [], "issues": []}
     else:
@@ -181,7 +216,7 @@ def run_knip_analysis(
                 message=f"Failed to parse Knip JSON output: {str(exc)}",
             )
 
-    # Save report file for transparency and reporting
+    # Save report file within safe workspace
     try:
         report_file.write_text(json.dumps(raw_data, indent=2), encoding="utf-8")
     except OSError as exc:
@@ -191,7 +226,7 @@ def run_knip_analysis(
     findings = normalize_knip_findings(raw_data, repo_root=str(repo_path_obj))
 
     return findings, ToolCoverageItem(
-        status="completed",
+        status=coverage_status,
         finding_count=len(findings),
-        message=None,
+        message=coverage_message,
     )

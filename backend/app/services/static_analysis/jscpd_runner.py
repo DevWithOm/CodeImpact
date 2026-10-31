@@ -10,8 +10,8 @@ from typing import Any
 from backend.app.schemas.analysis import ToolCoverageItem
 from backend.app.schemas.finding import Finding
 from backend.app.services.static_analysis.normalizer import normalize_jscpd_findings
-from backend.app.utils.file_utils import scan_repository_files
-from backend.app.utils.subprocess_runner import run_command
+from backend.app.utils.file_utils import is_safe_path, scan_repository_files
+from backend.app.utils.subprocess_runner import redact_secrets, run_command
 
 
 logger = logging.getLogger(__name__)
@@ -104,8 +104,26 @@ def run_jscpd_analysis(
             message="No JavaScript or TypeScript files found to analyze with jscpd.",
         )
 
+    # Security check: verify reports directory and reject symlink escape attempts
+    codeimpact_dir = repo_path_obj / ".codeimpact"
+    reports_dir = Path(output_dir) if output_dir else (codeimpact_dir / "reports" / "jscpd")
+
+    if codeimpact_dir.is_symlink() or reports_dir.is_symlink():
+        return [], ToolCoverageItem(
+            status="failed",
+            finding_count=0,
+            message="Security violation: .codeimpact directory or report path is an untrusted symbolic link.",
+        )
+
+    if not is_safe_path(str(repo_path_obj), str(reports_dir)):
+        return [], ToolCoverageItem(
+            status="failed",
+            finding_count=0,
+            message="Security violation: report output path escapes the repository workspace.",
+        )
+
     jscpd_bin = _find_jscpd_executable()
-    if jscpd_bin == "jscpd" and not Path("tooling/node_modules/jscpd").exists():
+    if not Path(jscpd_bin).exists() and not shutil.which(jscpd_bin):
         return [], ToolCoverageItem(
             status="failed",
             finding_count=0,
@@ -155,7 +173,7 @@ def run_jscpd_analysis(
         return [], ToolCoverageItem(
             status="failed",
             finding_count=0,
-            message=f"jscpd failed with exit code {result.exit_code}: {error_msg[:300]}",
+            message=f"jscpd failed with exit code {result.exit_code}: {redact_secrets(error_msg[:300])}",
         )
 
     # When jscpd finds 0 duplicates, it completes successfully and prints detection time, but creates no report file
@@ -185,7 +203,7 @@ def run_jscpd_analysis(
         return [], ToolCoverageItem(
             status="failed",
             finding_count=0,
-            message=f"jscpd report not generated: {error_msg[:300]}",
+            message=f"jscpd report not generated: {redact_secrets(error_msg[:300])}",
         )
 
     try:

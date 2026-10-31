@@ -45,7 +45,11 @@ def analyze_repository(
     """
     repo_path_obj = Path(repo_path).resolve()
     reports_dir = repo_path_obj / ".codeimpact" / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if not (repo_path_obj / ".codeimpact").is_symlink():
+            reports_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
     all_findings = []
 
@@ -90,3 +94,4 @@ def analyze_repository(
         "findings": serializable_findings,
         "tool_coverage": coverage_dict,
     }
+

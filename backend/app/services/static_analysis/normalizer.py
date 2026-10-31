@@ -20,7 +20,10 @@ def _generate_finding_id(prefix: str, identity_string: str) -> str:
 
 
 def _normalize_path(file_path: str, repo_root: str | None = None) -> str:
-    """Converts absolute or OS-specific paths to clean repository-relative POSIX paths."""
+    """Converts absolute or OS-specific paths to clean repository-relative POSIX paths.
+
+    Guarantees that absolute host paths are never exposed in user-facing findings.
+    """
     if not file_path:
         return ""
     p = Path(file_path)
@@ -210,13 +213,12 @@ def normalize_jscpd_findings(
     """Transforms raw jscpd JSON output into standardized Finding objects.
 
     Groups matching locations for duplicate blocks and preserves all reported coordinates.
+    Correctly preserves token counts (including raw 0 counts) without treating 0 as falsy/None.
     """
     duplicates = raw_jscpd_data.get("duplicates", [])
     if not duplicates:
         return []
 
-    # Map connected duplicate locations by fragment or pairwise relations
-    # We group pairs that share identical fragment or connect overlapping locations
     groups: list[dict[str, Any]] = []
 
     for dup in duplicates:
@@ -236,22 +238,20 @@ def normalize_jscpd_findings(
         loc2 = (second_path, int(second_start) if second_start is not None else None, int(second_end) if second_end is not None else None)
 
         lines_count = dup.get("lines")
-        tokens_count = dup.get("tokens")
+        tokens_count = dup.get("tokens")  # Numeric value from jscpd (e.g. 0 or 144)
         fragment = dup.get("fragment", "")
         format_name = dup.get("format", "unknown")
 
-        # Check if this duplicate merges with an existing group
         merged = False
         for grp in groups:
-            # Match if fragment is identical or either location matches an existing location in the group
             if (fragment and grp["fragment"] == fragment) or (loc1 in grp["locations"] or loc2 in grp["locations"]):
                 grp["locations"].add(loc1)
                 grp["locations"].add(loc2)
                 if not grp["fragment"] and fragment:
                     grp["fragment"] = fragment
-                if lines_count:
+                if lines_count is not None:
                     grp["lines"] = lines_count
-                if tokens_count:
+                if tokens_count is not None:
                     grp["tokens"] = tokens_count
                 merged = True
                 break
@@ -268,7 +268,6 @@ def normalize_jscpd_findings(
     findings: list[Finding] = []
 
     for grp in groups:
-        # Sort locations deterministically: by file path then start line
         sorted_locs = sorted(
             list(grp["locations"]),
             key=lambda x: (x[0], x[1] if x[1] is not None else -1)
@@ -280,14 +279,13 @@ def normalize_jscpd_findings(
         primary_path, primary_start, primary_end = primary
         other_locs = sorted_locs[1:]
 
-        # Deterministic finding ID
         dup_id_key = f"{primary_path}:{primary_start}:{len(other_locs)}:{other_locs[0][0] if other_locs else ''}"
         finding_id = _generate_finding_id("dup", dup_id_key)
 
         matching_paths = [l[0] for l in other_locs]
         matching_str = ", ".join(matching_paths)
-        lines_label = f"{grp['lines']} lines" if grp["lines"] else "matching code"
-        tokens_label = f", {grp['tokens']} tokens" if grp["tokens"] else ""
+        lines_label = f"{grp['lines']} lines" if grp["lines"] is not None else "matching code"
+        tokens_label = f", {grp['tokens']} tokens" if grp["tokens"] is not None and grp["tokens"] > 0 else ""
 
         other_locations_meta = [
             {
@@ -325,7 +323,7 @@ def normalize_jscpd_findings(
                         details=f"Identical or near-identical code lines detected across {len(sorted_locs)} locations.",
                         value={
                             "duplicate_lines": grp["lines"],
-                            "tokens": grp["tokens"],
+                            "tokens": grp["tokens"],  # Preserves raw value (0 or actual count)
                             "format": grp["format"],
                             "matching_location_count": len(other_locs),
                         },
@@ -338,13 +336,12 @@ def normalize_jscpd_findings(
                     "format": grp["format"],
                     "duplicate_locations": other_locations_meta,
                     "duplicate_lines": grp["lines"],
-                    "tokens": grp["tokens"],
+                    "tokens": grp["tokens"],  # Preserves raw value without falsy None conversion
                     "fragment_preview": grp["fragment"][:200] if grp["fragment"] else None,
                     "duplicate_group_size": len(sorted_locs),
                 },
             )
         )
 
-    # Sort findings by file path and start line
     findings.sort(key=lambda f: (f.file_path, f.start_line if f.start_line is not None else 0))
     return findings
